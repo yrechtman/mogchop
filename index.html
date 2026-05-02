@@ -492,9 +492,9 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
 
-  // Base photo, slightly darkened for line legibility.
+  // Base photo, darkened hard so the overlay reads as the primary content.
   ctx.drawImage(imgEl, 0, 0, W, H);
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(0, 0, W, H);
 
   const px = (i) => ({ x: lm[i].x * W, y: lm[i].y * H });
@@ -509,18 +509,36 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
     ctx.strokeStyle = color; ctx.lineWidth = width;
     ctx.setLineDash(dash || []);
   };
-  const line = (a, b) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
-  const ticked = (a, b, t = 8) => {
+  // Plain stroke (no halo) — for faint grids only.
+  const lineFaint = (a, b) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
+  // Haloed stroke — dark outline first, colored line on top. Every primary
+  // construction line uses this so it reads against any background.
+  const line = (a, b) => {
+    const fg = ctx.strokeStyle, fw = ctx.lineWidth, fd = ctx.getLineDash();
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = fw + 2.4;
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.strokeStyle = fg; ctx.lineWidth = fw; ctx.setLineDash(fd);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  };
+  const ticked = (a, b, t = 10) => {
     line(a, b);
     const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
     const nx = -dy / L * t, ny = dx / L * t;
-    ctx.beginPath();
-    ctx.moveTo(a.x - nx, a.y - ny); ctx.lineTo(a.x + nx, a.y + ny);
-    ctx.moveTo(b.x - nx, b.y - ny); ctx.lineTo(b.x + nx, b.y + ny);
-    ctx.stroke();
+    line({ x: a.x - nx, y: a.y - ny }, { x: a.x + nx, y: a.y + ny });
+    line({ x: b.x - nx, y: b.y - ny }, { x: b.x + nx, y: b.y + ny });
   };
-  const circle = (p, r) => { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.stroke(); };
-  const dot = (p, r) => { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill(); };
+  const arc = (cx, cy, r, a0, a1) => {
+    const fg = ctx.strokeStyle, fw = ctx.lineWidth, fd = ctx.getLineDash();
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = fw + 2.4; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+    ctx.strokeStyle = fg; ctx.lineWidth = fw; ctx.setLineDash(fd);
+    ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+  };
+  const circle = (p, r) => arc(p.x, p.y, r, 0, Math.PI * 2);
+  const dot = (p, r) => { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); };
   const chip = (text, anchor, color = '#F5F5F5', bg = 'rgba(0,0,0,0.82)', size = 11) => {
     ctx.font = `${size}px ui-monospace, "JetBrains Mono", monospace`;
     const w = ctx.measureText(text).width + 8;
@@ -535,72 +553,69 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
 
   const Mby = Object.fromEntries(M.metrics.map((m) => [m.id, m]));
 
-  // 1. Faint full 468-point mesh
-  ctx.fillStyle = 'rgba(255,42,42,0.5)';
-  for (const p of lm) ctx.fillRect(p.x * W - 0.5, p.y * H - 0.5, 1, 1);
+  // 1. Faint full 468-point mesh — bigger, brighter dots so they read.
+  ctx.fillStyle = 'rgba(255,80,80,0.85)';
+  for (const p of lm) ctx.fillRect(p.x * W - 0.9, p.y * H - 0.9, 1.8, 1.8);
 
-  // 2. Vertical fifths grid
-  set('rgba(245,245,245,0.32)', 0.6, [2, 5]);
+  // 2. Vertical fifths grid (faint, no halo)
+  set('rgba(245,245,245,0.45)', 0.8, [2, 5]);
   for (let i = 1; i < 5; i++) {
     const x = lJaw.x + (rJaw.x - lJaw.x) * i / 5;
-    line({ x, y: 0 }, { x, y: H });
+    lineFaint({ x, y: 0 }, { x, y: H });
   }
-  ctx.fillStyle = 'rgba(245,245,245,0.55)';
-  ctx.font = '9px ui-monospace, monospace';
-  ctx.fillText(`FIFTHS Σ = ${Mby.fifths.value.toFixed(3)}`, 8, H - 50);
+  ctx.fillStyle = 'rgba(245,245,245,0.95)';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText(`FIFTHS Σ = ${Mby.fifths.value.toFixed(3)}`, 8, H - 52);
 
-  // 3. Horizontal thirds rule
+  // 3. Horizontal thirds rule (faint, no halo)
   const browMid = mid(px(LM.L_brow_inner), px(LM.R_brow_inner));
   const subn = px(LM.subnasale);
-  set('rgba(245,245,245,0.55)', 0.7, [4, 4]);
-  for (const y of [fh.y, browMid.y, subn.y, ch.y]) line({ x: 0, y }, { x: W, y });
-  ctx.fillStyle = 'rgba(245,245,245,0.85)';
-  ctx.font = '10px ui-monospace, monospace';
-  ctx.fillText(`T₁ = ${(dist(fh, browMid)/faceH).toFixed(3)}`, 8, fh.y + 14);
-  ctx.fillText(`T₂ = ${(dist(browMid, subn)/faceH).toFixed(3)}`, 8, browMid.y + 14);
-  ctx.fillText(`T₃ = ${(dist(subn, ch)/faceH).toFixed(3)}`, 8, subn.y + 14);
+  set('rgba(245,245,245,0.7)', 0.8, [5, 4]);
+  for (const y of [fh.y, browMid.y, subn.y, ch.y]) lineFaint({ x: 0, y }, { x: W, y });
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText(`T₁ = ${(dist(fh, browMid)/faceH).toFixed(3)}`, 8, fh.y + 16);
+  ctx.fillText(`T₂ = ${(dist(browMid, subn)/faceH).toFixed(3)}`, 8, browMid.y + 16);
+  ctx.fillText(`T₃ = ${(dist(subn, ch)/faceH).toFixed(3)}`, 8, subn.y + 16);
 
-  // 4. Subject midline (red, extended)
-  set('rgba(255,42,42,0.92)', 1.4);
-  const dxN = (ch.x - fh.x) / faceH, dyN = (ch.y - fh.y) / faceH, ext = 28;
+  // 4. Subject midline (red, extended) — bold
+  set('#FF2A2A', 2.2);
+  const dxN = (ch.x - fh.x) / faceH, dyN = (ch.y - fh.y) / faceH, ext = 36;
   line({ x: fh.x - dxN*ext, y: fh.y - dyN*ext }, { x: ch.x + dxN*ext, y: ch.y + dyN*ext });
 
   // 5. Bizygomatic + bigonial calipers (values live in the bottom telemetry strip)
-  set('#F5F5F5', 1);
-  ticked(lZyg, rZyg, 10);
-  ticked(lGon, rGon, 10);
+  set('#FFFFFF', 1.6);
+  ticked(lZyg, rZyg, 12);
+  ticked(lGon, rGon, 12);
 
   // 6. Inter-canthal width
   const lInner = px(LM.L_eye_inner), rInner = px(LM.R_eye_inner);
-  set('rgba(255,42,42,0.85)', 1);
-  ticked(lInner, rInner, 6);
+  set('#FF2A2A', 1.4);
+  ticked(lInner, rInner, 8);
 
   // 7. Canthal tilt — line + horizontal baseline + arc + signed value
   const tiltAt = (innerIdx, outerIdx) => {
     const inn = px(innerIdx), out = px(outerIdx);
     const dxSign = (out.x - inn.x) >= 0 ? 1 : -1;
-    set('#FFEC2A', 1.2); line(inn, out);
-    set('rgba(255,236,42,0.45)', 0.8, [3, 3]); line(inn, { x: out.x, y: inn.y });
-    set('#FFEC2A', 0.9);
-    const r = 22;
+    set('#FFEC2A', 1.8); line(inn, out);
+    set('rgba(255,236,42,0.7)', 1.2, [4, 3]); line(inn, { x: out.x, y: inn.y });
+    set('#FFEC2A', 1.4);
+    const r = 24;
     const a0 = dxSign > 0 ? 0 : Math.PI;
     const a1 = Math.atan2(out.y - inn.y, out.x - inn.x);
-    ctx.beginPath();
-    ctx.arc(inn.x, inn.y, r, Math.min(a0, a1), Math.max(a0, a1));
-    ctx.stroke();
+    arc(inn.x, inn.y, r, Math.min(a0, a1), Math.max(a0, a1));
     const signed = Math.atan2(inn.y - out.y, Math.abs(out.x - inn.x)) * 180 / Math.PI;
     const txt = `${signed >= 0 ? '+' : ''}${signed.toFixed(1)}°`;
-    ctx.font = `11px ui-monospace, "JetBrains Mono", monospace`;
+    ctx.font = 'bold 12px ui-monospace, "JetBrains Mono", monospace';
     const w = ctx.measureText(txt).width + 8;
     const labelX = dxSign > 0 ? inn.x + r + 4 : inn.x - r - 4 - w;
-    chip(txt, { x: labelX, y: inn.y + 4 }, '#FFEC2A');
+    chip(txt, { x: labelX, y: inn.y + 4 }, '#FFEC2A', 'rgba(0,0,0,0.92)', 12);
   };
   tiltAt(LM.L_eye_inner, LM.L_eye_outer);
   tiltAt(LM.R_eye_inner, LM.R_eye_outer);
 
   // 8. Eye boxes (frontal aperture zones)
-  set('rgba(46,207,107,0.7)', 0.8);
-  ctx.font = '9px ui-monospace, monospace';
+  ctx.font = 'bold 10px ui-monospace, monospace';
   for (const [innerI, outerI, topI, botI, side] of [
     [LM.L_eye_inner, LM.L_eye_outer, LM.L_eye_top, LM.L_eye_bot, 'L'],
     [LM.R_eye_inner, LM.R_eye_outer, LM.R_eye_top, LM.R_eye_bot, 'R'],
@@ -608,27 +623,34 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
     const inn = px(innerI), out = px(outerI), top = px(topI), bot = px(botI);
     const xMin = Math.min(inn.x, out.x) - 4, xMax = Math.max(inn.x, out.x) + 4;
     const yMin = top.y - 4, yMax = bot.y + 4;
-    ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
-    ctx.fillStyle = 'rgba(46,207,107,0.95)';
-    ctx.fillText(`AP·${side}`, xMin + 2, yMin - 3);
+    set('#2ECF6B', 1.4);
+    line({ x: xMin, y: yMin }, { x: xMax, y: yMin });
+    line({ x: xMax, y: yMin }, { x: xMax, y: yMax });
+    line({ x: xMax, y: yMax }, { x: xMin, y: yMax });
+    line({ x: xMin, y: yMax }, { x: xMin, y: yMin });
+    ctx.fillStyle = '#2ECF6B';
+    ctx.fillText(`AP·${side}`, xMin + 2, yMin - 4);
   }
 
   // 9. Mandibular angle arcs
   const mandAt = (gonI, jawI) => {
     const gon = px(gonI), jaw = px(jawI);
-    set('#FF2A2A', 1.2); line(ch, gon); line(gon, jaw);
-    set('rgba(255,42,42,0.55)', 0.8);
-    const r = 26;
+    set('#FF2A2A', 1.8); line(ch, gon); line(gon, jaw);
+    set('#FF2A2A', 1.4);
+    const r = 28;
     const a1 = Math.atan2(ch.y - gon.y, ch.x - gon.x);
     const a2 = Math.atan2(jaw.y - gon.y, jaw.x - gon.x);
-    ctx.beginPath();
-    ctx.arc(gon.x, gon.y, r, Math.min(a1, a2), Math.max(a1, a2));
-    ctx.stroke();
+    arc(gon.x, gon.y, r, Math.min(a1, a2), Math.max(a1, a2));
     const v1 = { x: ch.x - gon.x, y: ch.y - gon.y };
     const v2 = { x: jaw.x - gon.x, y: jaw.y - gon.y };
     const cos = (v1.x*v2.x + v1.y*v2.y) / ((Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y)) || 1);
     const angDeg = Math.acos(clamp(cos, -1, 1)) * 180 / Math.PI;
-    chip(`${angDeg.toFixed(0)}°`, { x: gon.x + r + 4, y: gon.y + 6 }, '#FF8888');
+    const dxSign = (jaw.x - gon.x) >= 0 ? 1 : -1;
+    const txt = `${angDeg.toFixed(0)}°`;
+    ctx.font = 'bold 12px ui-monospace, monospace';
+    const w = ctx.measureText(txt).width + 8;
+    const lx = dxSign > 0 ? gon.x + r + 4 : gon.x - r - 4 - w;
+    chip(txt, { x: lx, y: gon.y + 6 }, '#FF8888', 'rgba(0,0,0,0.92)', 12);
   };
   mandAt(LM.L_gonion, LM.L_jaw_lat);
   mandAt(LM.R_gonion, LM.R_jaw_lat);
@@ -639,30 +661,30 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
   const ulT = px(LM.upper_lip_top), llB = px(LM.lower_lip_bot);
   const ulO = px(LM.upper_lip_outer), llO = px(LM.lower_lip_outer);
 
-  set('rgba(245,245,245,0.85)', 1);
-  ticked(lAl, rAl, 6);
-  ticked(lMo, rMo, 6);
+  set('#FFFFFF', 1.4);
+  ticked(lAl, rAl, 8);
+  ticked(lMo, rMo, 8);
 
-  set('#FFEC2A', 1);
+  set('#FFEC2A', 1.4);
   line(subn, ulT);
 
-  set('rgba(255,42,42,0.85)', 0.8);
+  set('#FF2A2A', 1.4);
   line(ulO, ulT);
   line(llB, llO);
 
   // 11. Brow arch
-  set('#2ECF6B', 1);
+  set('#2ECF6B', 1.6);
   line(px(LM.L_brow_inner), px(LM.L_brow_outer));
   line(px(LM.R_brow_inner), px(LM.R_brow_outer));
 
   // 12. Naso-facial axis
-  set('rgba(255,236,42,0.85)', 1, [4, 3]);
+  set('#FFEC2A', 1.4, [5, 3]);
   line(px(LM.nose_bridge), subn);
 
   // 13. Glyph-labeled anatomical landmarks
-  set('rgba(245,245,245,0.95)', 0.9);
-  ctx.fillStyle = 'rgba(245,245,245,0.95)';
-  ctx.font = '10px ui-monospace, monospace';
+  set('#FFFFFF', 1.4);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 12px ui-monospace, monospace';
   const KEYPTS = [
     ['α', LM.forehead], ['β', LM.chin], ['γ', LM.nose_tip], ['δ', LM.subnasale],
     ['ε₁', LM.L_eye_outer], ['ε₂', LM.R_eye_outer],
@@ -671,13 +693,20 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
   ];
   for (const [g, idx] of KEYPTS) {
     const p = px(idx);
-    circle(p, 4); dot(p, 1.2);
-    ctx.fillText(g, p.x + 6, p.y - 6);
+    circle(p, 5); dot(p, 1.6);
+    // text shadow / halo for the glyph
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillText(g, p.x + 7, p.y - 6);
+    ctx.fillText(g, p.x + 7, p.y - 8);
+    ctx.fillText(g, p.x + 5, p.y - 7);
+    ctx.fillText(g, p.x + 9, p.y - 7);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(g, p.x + 7, p.y - 7);
   }
 
   // 14. Corner registration marks
-  set('rgba(255,42,42,0.85)', 1.4);
-  const cs = 18;
+  set('#FF2A2A', 2);
+  const cs = 22;
   for (const [cx, cy] of [[10, 10], [W-10, 10], [10, H-10], [W-10, H-10]]) {
     const dx = cx === 10 ? 1 : -1, dy = cy === 10 ? 1 : -1;
     line({ x: cx, y: cy }, { x: cx + dx*cs, y: cy });
@@ -760,7 +789,14 @@ function parseLiveSections(raw) {
 const Header = ({ subtitle, scanId }) => (
   <header className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
     <div className="flex items-center gap-3">
-      <div className="font-display text-2xl leading-none tracking-tight">MOG<span className="text-[var(--red)]">/</span>CHOP</div>
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new Event('cae:home'))}
+        aria-label="Return to home"
+        className="font-display text-2xl leading-none tracking-tight cursor-pointer hover:opacity-70 transition-opacity bg-transparent border-0 p-0 text-inherit"
+      >
+        MOG<span className="text-[var(--red)]">/</span>CHOP
+      </button>
       <div className="hidden sm:block label">{SUB}</div>
     </div>
     <div className="flex items-center gap-3">
@@ -1310,6 +1346,11 @@ const History = ({ scans, onOpen, onBack, onClear }) => (
   </div>
 );
 
+// ---- Debug hooks (harmless; stripped before prod releases) ---------------
+if (typeof window !== 'undefined') {
+  window.__CAE = { renderAnnotatedDossier, computeMetrics, getLandmarker, verdictFor, LM };
+}
+
 // ---- Main App ------------------------------------------------------------
 const App = () => {
   const [stage, setStage] = useState('intake'); // intake | camera | confirm | scan | result | history
@@ -1327,6 +1368,22 @@ const App = () => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
+  }, []);
+
+  // Logo click → return home and reset transient scan state
+  useEffect(() => {
+    const goHome = () => {
+      setImage(null);
+      setScan(null);
+      setMetricsState(null);
+      setProgress(0);
+      setStatusLines([]);
+      setScanId(null);
+      setErr(null);
+      setStage('intake');
+    };
+    window.addEventListener('cae:home', goHome);
+    return () => window.removeEventListener('cae:home', goHome);
   }, []);
 
   // Load history
