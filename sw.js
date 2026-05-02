@@ -1,4 +1,4 @@
-const CACHE = 'mogchop-v1';
+const CACHE = 'mogchop-v2';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg'];
 
 self.addEventListener('install', (e) => {

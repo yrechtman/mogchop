@@ -156,6 +156,41 @@
     .stamp-mog { color: var(--green); text-shadow: 0 0 24px rgba(46,207,107,0.18); }
     .stamp-chop { color: var(--red); text-shadow: 0 0 24px rgba(255,42,42,0.22); }
     .vignette { box-shadow: inset 0 0 80px rgba(0,0,0,0.6); }
+    .stamp-slam { animation: stampSlam 880ms cubic-bezier(0.2, 0.8, 0.25, 1.05) both; transform-origin: center; }
+    @keyframes stampSlam {
+      0%   { transform: scale(3.5) rotate(-12deg); opacity: 0; filter: blur(10px); }
+      55%  { transform: scale(0.82) rotate(2deg);  opacity: 1; filter: blur(0);   }
+      72%  { transform: scale(1.10) rotate(-1deg); }
+      100% { transform: scale(1)    rotate(0);     }
+    }
+    .stamp-flash { position: absolute; inset: 0; pointer-events: none; animation: stampFlash 700ms ease-out both; animation-delay: 380ms; }
+    @keyframes stampFlash {
+      0%, 100% { background: transparent; }
+      35% { background: rgba(245,245,245,0.07); }
+    }
+    video.specimen-feed { width: 100%; height: 100%; object-fit: cover; display: block; transform: scaleX(-1); position: absolute; inset: 0; }
+    video.specimen-feed.no-mirror { transform: none; }
+    .face-frame {
+      position: absolute; inset: 6% 14%;
+      border: 1.5px dashed rgba(245,245,245,0.55);
+      border-radius: 50% / 60%;
+      pointer-events: none;
+    }
+    .face-frame.locked { border-color: var(--green); border-style: solid; box-shadow: 0 0 24px rgba(46,207,107,0.25); }
+    .shutter-btn {
+      width: 76px; height: 76px; border-radius: 50%;
+      border: 3px solid var(--fg); background: var(--fg);
+      position: relative; cursor: pointer;
+      transition: transform 0.08s ease;
+    }
+    .shutter-btn::before {
+      content: ''; position: absolute; inset: 6px;
+      border: 2px solid #000; border-radius: 50%;
+      background: var(--fg);
+    }
+    .shutter-btn:active { transform: scale(0.92); }
+    .shutter-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .shutter-btn.armed::before { background: var(--red); border-color: var(--red); }
     input[type="file"] { display: none; }
     .marquee {
       white-space: nowrap;
@@ -439,6 +474,35 @@ function canvasToB64(canvas, type = 'image/jpeg', q = 0.85) {
   return canvas.toDataURL(type, q);
 }
 
+// ---- Live section parser (mirrors api/analyze.js parseSections) ----------
+function parseLiveSections(raw) {
+  const out = { observations: '', profile_inference: '', strengths: [], weaknesses: [], final_remark: '' };
+  const lines = raw.split('\n');
+  let current = null;
+  const buf = { observations: [], profile_inference: [], strengths: [], weaknesses: [], final_remark: [] };
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^\[\+\]\s+OBSERVATIONS\b/i.test(t)) { current = 'observations'; continue; }
+    if (/^\[\+\]\s+PROFILE(\s+INFERENCE)?\b/i.test(t)) { current = 'profile_inference'; continue; }
+    if (/^\[\+\]\s+STRENGTHS\b/i.test(t)) { current = 'strengths'; continue; }
+    if (/^\[\+\]\s+WEAKNESSES\b/i.test(t)) { current = 'weaknesses'; continue; }
+    if (/^\[\+\]\s+(FINAL\s+REMARK|REMARK)\b/i.test(t)) { current = 'final_remark'; continue; }
+    if (!current) continue;
+    if (current === 'strengths' || current === 'weaknesses') {
+      const m = /^[-•]\s+(.*)$/.exec(t);
+      if (m) buf[current].push(m[1].trim());
+    } else {
+      buf[current].push(line);
+    }
+  }
+  out.observations = buf.observations.join('\n').trim();
+  out.profile_inference = buf.profile_inference.join('\n').trim();
+  out.strengths = buf.strengths;
+  out.weaknesses = buf.weaknesses;
+  out.final_remark = buf.final_remark.join('\n').trim();
+  return out;
+}
+
 // ---- UI Components -------------------------------------------------------
 
 const Header = ({ subtitle, scanId }) => (
@@ -479,7 +543,7 @@ const StatRow = ({ k, v, hint, status }) => (
 );
 
 // ---- Intake screen -------------------------------------------------------
-const Intake = ({ onPick, history, onOpenHistory }) => {
+const Intake = ({ onCamera, onPick, history, onOpenHistory }) => {
   const fileRef = useRef(null);
   return (
     <div className="grid-bg min-h-[100dvh]">
@@ -522,16 +586,15 @@ const Intake = ({ onPick, history, onOpenHistory }) => {
           ref={fileRef}
           type="file"
           accept="image/*"
-          capture="user"
           onChange={(e) => e.target.files[0] && onPick(e.target.files[0])}
         />
-        <button className="btn mb-2" onClick={() => fileRef.current?.click()}>
+        <button className="btn mb-2" onClick={onCamera}>
           <span>▸ BEGIN ANALYSIS</span>
           <span className="opacity-50">↵</span>
         </button>
         <button
           className="btn btn-ghost"
-          onClick={() => { if (fileRef.current) { fileRef.current.removeAttribute('capture'); fileRef.current.click(); fileRef.current.setAttribute('capture','user'); } }}
+          onClick={() => fileRef.current?.click()}
         >
           <span>UPLOAD FROM LIBRARY</span>
           <span className="opacity-50">↑</span>
@@ -548,6 +611,153 @@ const Intake = ({ onPick, history, onOpenHistory }) => {
           <span className="label">BUILD {BUILD}</span>
           <span className="label">© CAE LABORATORIES</span>
         </footer>
+      </main>
+    </div>
+  );
+};
+
+// ---- Live camera screen --------------------------------------------------
+const Camera = ({ onCapture, onCancel, onUpload }) => {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [facingMode, setFacingMode] = useState('user');
+  const [error, setError] = useState(null);
+  const [ready, setReady] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const start = async () => {
+      setError(null);
+      setReady(false);
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('CAMERA UNSUPPORTED');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode, width: { ideal: 1280 }, height: { ideal: 1280 } },
+          audio: false,
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        const v = videoRef.current;
+        if (v) {
+          v.srcObject = stream;
+          v.onloadedmetadata = () => v.play().then(() => setReady(true)).catch(() => setReady(true));
+        }
+      } catch (e) {
+        const code = e?.name || '';
+        if (code === 'NotAllowedError' || code === 'SecurityError') setError('CAMERA ACCESS DENIED');
+        else if (code === 'NotFoundError' || code === 'OverconstrainedError') setError('NO CAMERA FOUND');
+        else setError('CAMERA UNAVAILABLE');
+      }
+    };
+    start();
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, [facingMode]);
+
+  const doSnap = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    const ctx = c.getContext('2d');
+    if (facingMode === 'user') {
+      ctx.translate(c.width, 0); ctx.scale(-1, 1);
+    }
+    ctx.drawImage(v, 0, 0);
+    c.toBlob((blob) => {
+      if (!blob) return;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      const file = new File([blob], `mogchop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      onCapture(file);
+    }, 'image/jpeg', 0.92);
+  }, [facingMode, onCapture]);
+
+  const startCountdown = () => {
+    if (!ready || countdown > 0) return;
+    setCountdown(3);
+  };
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => {
+      if (countdown === 1) { doSnap(); setCountdown(0); }
+      else setCountdown(countdown - 1);
+    }, 700);
+    return () => clearTimeout(t);
+  }, [countdown, doSnap]);
+
+  const flip = () => setFacingMode((f) => f === 'user' ? 'environment' : 'user');
+
+  return (
+    <div className="grid-bg min-h-[100dvh]">
+      <Header />
+      <main className="px-4 py-4 max-w-md mx-auto">
+        <div className="panel p-3 mb-3 relative">
+          <span className="corner tl"></span><span className="corner tr"></span>
+          <span className="corner bl"></span><span className="corner br"></span>
+          <div className="flex items-center justify-between mb-2">
+            <span className="label text-[var(--red)]">// LIVE FEED</span>
+            <span className="label num">{facingMode === 'user' ? 'FRONT/USER' : 'REAR/ENV'}</span>
+          </div>
+          <div className="relative bg-[var(--bg-2)]" style={{ aspectRatio: '3 / 4', overflow: 'hidden' }}>
+            {error ? (
+              <div className="absolute inset-0 flex items-center justify-center text-[var(--red)] text-center px-4">
+                <div>
+                  <div className="font-display text-3xl mb-2">{error}</div>
+                  <div className="label">enable camera permissions or use upload</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <video
+                  ref={videoRef}
+                  className={`specimen-feed ${facingMode !== 'user' ? 'no-mirror' : ''}`}
+                  autoPlay playsInline muted
+                />
+                <div className="face-frame"></div>
+                <div className="crosshair-h" style={{ top: '33.3%' }}></div>
+                <div className="crosshair-h" style={{ top: '66.6%' }}></div>
+                <div className="crosshair-v" style={{ left: '50%' }}></div>
+                {countdown > 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="font-display stamp text-[var(--red)]" style={{ fontSize: '38vw', textShadow: '0 0 32px rgba(255,42,42,0.55)' }}>
+                      {countdown}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <span className="label">{error ? 'OFFLINE' : ready ? 'READY' : 'INITIALIZING…'}</span>
+            <span className="label">center face within ellipse</span>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-3 px-2">
+          <button className="btn btn-ghost !w-auto !px-4" onClick={flip} disabled={!!error || !ready}>
+            <span>FLIP ↻</span>
+          </button>
+          <button
+            onClick={startCountdown}
+            disabled={!ready || !!error || countdown > 0}
+            className={`shutter-btn ${countdown > 0 ? 'armed' : ''}`}
+            aria-label="Capture"
+          ></button>
+          <button className="btn btn-ghost !w-auto !px-4" onClick={onUpload}>
+            <span>UPLOAD ↑</span>
+          </button>
+        </div>
+        <button className="btn btn-ghost" onClick={onCancel}>
+          <span>← CANCEL</span>
+        </button>
       </main>
     </div>
   );
@@ -655,6 +865,7 @@ const Scanning = ({ image, metrics, progress, statusLines, scanId }) => {
 const Result = ({ scan, onNew, onShare }) => {
   const v = scan.verdict;
   const overall = scan.overall;
+  const streaming = !!scan.streaming;
   const stampClass = v.side === 'mog' ? 'stamp-mog' : v.side === 'chop' ? 'stamp-chop' : 'text-[var(--amber)]';
 
   return (
@@ -663,11 +874,12 @@ const Result = ({ scan, onNew, onShare }) => {
       <main className="px-4 py-4 max-w-md mx-auto">
 
         {/* Verdict stamp */}
-        <div className="panel p-5 mb-3 relative vignette text-center">
+        <div className="panel p-5 mb-3 relative vignette text-center overflow-hidden">
           <span className="corner tl"></span><span className="corner tr"></span>
           <span className="corner bl"></span><span className="corner br"></span>
           <div className="label mb-2">// CLASSIFICATION</div>
-          <div className={`stamp font-display ${stampClass}`}>{v.stamp}</div>
+          <div key={scan.id} className={`stamp font-display ${stampClass} stamp-slam`}>{v.stamp}</div>
+          <div className="stamp-flash" key={`f-${scan.id}`}></div>
           <div className="font-display tracking-widest mt-1">{v.tier}</div>
           <div className="text-[var(--dim)] text-[11px] mt-1">{v.blurb}</div>
           <div className="grid grid-cols-3 mt-4 border-t border-[var(--line)] pt-3 text-center">
@@ -698,15 +910,28 @@ const Result = ({ scan, onNew, onShare }) => {
         </div>
 
         {/* Vision commentary */}
-        {scan.commentary && (
+        {(scan.commentary || streaming) && (
           <div className="panel p-4 mb-3 relative">
             <span className="corner tl"></span><span className="corner tr"></span>
             <span className="corner bl"></span><span className="corner br"></span>
-            <div className="label mb-2">// QUALITATIVE OBSERVATIONS</div>
-            <div className="text-[12px] leading-relaxed text-[var(--fg)] whitespace-pre-line">
-              {scan.commentary.observations}
+            <div className="flex items-center justify-between mb-2">
+              <span className="label">// QUALITATIVE OBSERVATIONS</span>
+              {streaming
+                ? <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)] pulse-dot"></span>STREAMING</span>
+                : <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--green)]"></span>COMPLETE</span>}
             </div>
-            {scan.commentary.strengths?.length > 0 && (
+            <div className={`text-[12px] leading-relaxed text-[var(--fg)] whitespace-pre-line ${streaming && !scan.commentary?.profile_inference ? 'typewriter' : ''}`}>
+              {scan.commentary?.observations || (streaming ? 'awaiting transmission…' : '')}
+            </div>
+            {scan.commentary?.profile_inference && (
+              <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
+                <div className="label mb-1">// PROFILE INFERENCE</div>
+                <div className={`text-[12px] leading-relaxed whitespace-pre-line ${streaming && !scan.commentary?.strengths?.length ? 'typewriter' : ''}`}>
+                  {scan.commentary.profile_inference}
+                </div>
+              </div>
+            )}
+            {scan.commentary?.strengths?.length > 0 && (
               <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
                 <div className="label mb-1 text-[var(--green)]">+ POSITIVE INDICATORS</div>
                 <ul className="text-[12px] space-y-0.5">
@@ -714,12 +939,18 @@ const Result = ({ scan, onNew, onShare }) => {
                 </ul>
               </div>
             )}
-            {scan.commentary.weaknesses?.length > 0 && (
+            {scan.commentary?.weaknesses?.length > 0 && (
               <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
                 <div className="label mb-1 text-[var(--red)]">− DEVIATIONS</div>
                 <ul className="text-[12px] space-y-0.5">
                   {scan.commentary.weaknesses.map((s, i) => <li key={i}>· {s}</li>)}
                 </ul>
+              </div>
+            )}
+            {scan.commentary?.final_remark && (
+              <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
+                <div className="label mb-1">// TERMINAL NOTE</div>
+                <div className="text-[12px] leading-relaxed italic">{scan.commentary.final_remark}</div>
               </div>
             )}
           </div>
@@ -825,7 +1056,7 @@ const History = ({ scans, onOpen, onBack, onClear }) => (
 
 // ---- Main App ------------------------------------------------------------
 const App = () => {
-  const [stage, setStage] = useState('intake'); // intake | confirm | scan | result | history
+  const [stage, setStage] = useState('intake'); // intake | camera | confirm | scan | result | history
   const [image, setImage] = useState(null); // { el, url, width, height, file }
   const [scanId, setScanId] = useState(null);
   const [progress, setProgress] = useState(0);
@@ -912,7 +1143,7 @@ const App = () => {
       pushStatus('forwarding to vision-grade qualitative layer…');
       setProgress(82);
 
-      // Send to API
+      // Send to API (streaming SSE)
       const photoB64 = canvasToB64(downsize(image.el, 768), 'image/jpeg', 0.82);
       const summary = M.metrics.map((m) => ({
         id: m.id, label: m.label, value: Number(m.value.toFixed(4)),
@@ -921,7 +1152,29 @@ const App = () => {
       }));
 
       const v = verdictFor(M.overall);
+      const sigmaDrift = Math.sqrt(M.metrics.reduce((s, m) => s + m.z*m.z, 0) / M.metrics.length);
+      const percentile = clamp(100 - (M.overall < 50 ? 90 : 100) * (1 - Math.pow(M.overall/100, 1.4)) + (Math.random()-0.5)*4, 1, 99);
+      const thumbCanvas = downsize(image.el, 480);
+      const thumb = canvasToB64(thumbCanvas, 'image/jpeg', 0.7);
+
+      const baseRecord = {
+        id: scanId,
+        ts: Date.now(),
+        overall: M.overall,
+        sigmaDrift,
+        percentile,
+        verdict: v,
+        metrics: M.metrics.map(({ id, label, value, unit, mu, sigma, z, score, isScore }) => ({ id, label, value, unit, mu, sigma, z, score, isScore })),
+        thumbnail: thumb,
+        commentary: { observations: '', profile_inference: '', strengths: [], weaknesses: [], final_remark: '' },
+        streaming: true,
+      };
+      setScan(baseRecord);
+      setProgress(95);
+      setStage('result');
+
       let commentary = null;
+      let meta = null;
       try {
         const res = await fetch('/api/analyze', {
           method: 'POST',
@@ -933,39 +1186,50 @@ const App = () => {
             verdict: v,
           }),
         });
-        if (res.ok) {
-          commentary = await res.json();
-          pushStatus('qualitative layer: complete');
-        } else {
+        if (!res.ok || !res.body) {
           pushStatus(`qualitative layer: degraded (${res.status})`);
+        } else {
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          let buf = '';
+          let acc = '';
+          outer: while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+              const evt = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              const eMatch = evt.match(/^event: (.+)$/m);
+              const dMatch = evt.match(/^data: (.+)$/m);
+              if (!eMatch || !dMatch) continue;
+              let payload;
+              try { payload = JSON.parse(dMatch[1]); } catch { continue; }
+              const eventType = eMatch[1];
+              if (eventType === 'delta') {
+                acc += payload.t;
+                const live = parseLiveSections(acc);
+                setScan((s) => s ? { ...s, commentary: live } : s);
+              } else if (eventType === 'complete') {
+                commentary = payload.result;
+                meta = payload.meta;
+              } else if (eventType === 'error') {
+                pushStatus(`qualitative layer: ${payload.message}`);
+                break outer;
+              }
+            }
+          }
+          if (commentary) pushStatus('qualitative layer: complete');
         }
       } catch (e) {
         pushStatus('qualitative layer: offline');
       }
       setProgress(100);
 
-      // Build scan record
-      const sigmaDrift = Math.sqrt(M.metrics.reduce((s, m) => s + m.z*m.z, 0) / M.metrics.length);
-      const percentile = clamp(100 - (M.overall < 50 ? 90 : 100) * (1 - Math.pow(M.overall/100, 1.4)) + (Math.random()-0.5)*4, 1, 99);
-      const thumbCanvas = downsize(image.el, 480);
-      const thumb = canvasToB64(thumbCanvas, 'image/jpeg', 0.7);
-      const record = {
-        id: scanId,
-        ts: Date.now(),
-        overall: M.overall,
-        sigmaDrift,
-        percentile,
-        verdict: v,
-        metrics: M.metrics.map(({ id, label, value, unit, mu, sigma, z, score, isScore }) => ({ id, label, value, unit, mu, sigma, z, score, isScore })),
-        thumbnail: thumb,
-        commentary,
-      };
-      const next = [record, ...history].slice(0, 50);
-      saveHistory(next);
-      setScan(record);
-
-      await new Promise((r) => setTimeout(r, 350));
-      setStage('result');
+      const finalRecord = { ...baseRecord, commentary: commentary || baseRecord.commentary, streaming: false, meta };
+      saveHistory([finalRecord, ...history].slice(0, 50));
+      setScan(finalRecord);
     } catch (e) {
       console.error(e);
       pushStatus(`fault: ${e.message || 'UNKNOWN'}`);
@@ -1003,10 +1267,18 @@ const App = () => {
   }
 
   if (stage === 'intake') {
-    return <Intake onPick={handlePick} history={history} onOpenHistory={() => setStage('history')} />;
+    return <Intake onCamera={() => setStage('camera')} onPick={handlePick} history={history} onOpenHistory={() => setStage('history')} />;
+  }
+  if (stage === 'camera') {
+    return <Camera onCapture={handlePick} onCancel={() => setStage('intake')} onUpload={() => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*';
+      inp.onchange = (e) => e.target.files[0] && handlePick(e.target.files[0]);
+      inp.click();
+    }} />;
   }
   if (stage === 'confirm') {
-    return <Confirm image={image} scanId={scanId} onRetake={() => setStage('intake')} onProceed={handleAnalyze} />;
+    return <Confirm image={image} scanId={scanId} onRetake={() => setStage('camera')} onProceed={handleAnalyze} />;
   }
   if (stage === 'scan') {
     return <Scanning image={image} metrics={metricsState} progress={progress} statusLines={statusLines} scanId={scanId} />;

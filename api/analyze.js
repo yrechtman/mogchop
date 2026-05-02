@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 
+export const config = { runtime: 'nodejs' };
+
 const SYSTEM_PROMPT = `You are the qualitative-analysis layer of MOG/CHOP — a craniofacial morphometric analysis instrument operated by CAE Laboratories. Your output is rendered alongside computer-vision-derived geometric metrics on a clinical-style dossier.
 
 # OPERATING CHARACTER
@@ -40,62 +42,37 @@ The 12 indices and what they measure:
 
 12. Mandibular Gonial Angle. Approximate angle at the gonion. Ideal ~122°. Lower (sharper) = more defined jawline; higher = softer mandibular contour.
 
-# WHAT YOU PRODUCE
+# OUTPUT FORMAT — STRICT
 
-A JSON object with exactly these fields:
+Output PLAIN TEXT only, with the following six sections in order. No JSON. No markdown headers. No preamble. The section markers must appear EXACTLY as written, on their own line, in ALL CAPS with the leading [+] sigil:
 
-- observations: 4–6 sentences of integrated clinical prose. Synthesize the strongest 2–3 metric findings into anatomical observations. Reference the actual values where it adds rigor. Speak as the instrument: "BSI of 87.4 places the specimen in the upper quartile of bilateral fidelity. Canthal tilt at +5.8° is consistent with positive periorbital orientation. Facial-thirds deviation registers a moderate compression of the lower third (t3 = 0.310 vs. 0.333 ideal)." Do not list every metric — pick the most informative.
+[+] OBSERVATIONS
+4–6 sentences of integrated clinical prose. Synthesize the strongest 2–3 metric findings into anatomical observations. Reference actual values where it adds rigor. Speak as the instrument: "BSI of 87.4 places the specimen in the upper quartile of bilateral fidelity. Canthal tilt at +5.8° is consistent with positive periorbital orientation." Do not list every metric — pick the most informative.
 
-- profile_inference: 2–3 sentences inferring profile/three-quarter characteristics from the frontal view. You CAN make calibrated inferences: a steep facial-thirds compression with a low philtral index suggests a recessed maxilla; high bizygomatic with low mandibular angle suggests a defined jawline projection; etc. Speak in hedged technical language ("anterior projection appears within nominal envelope," "lower-third sagittal positioning cannot be precisely resolved from this view but is consistent with…"). Never claim to see what 3D structure isn't visible.
+[+] PROFILE INFERENCE
+2–3 sentences inferring profile/three-quarter characteristics from the frontal view. You CAN make calibrated inferences: a steep facial-thirds compression with a low philtral index suggests a recessed maxilla; high bizygomatic with low mandibular angle suggests a defined jawline projection. Speak in hedged technical language ("anterior projection appears within nominal envelope," "lower-third sagittal positioning cannot be precisely resolved from this view but is consistent with…"). Never claim to see what 3D structure isn't visible.
 
-- strengths: 2–4 short bullets, each a single clause. Phrase as positive technical findings. e.g., "Symmetry within elite envelope (BSI > 90)." "Positive canthal tilt with bilateral consistency." Each ≤ 80 chars.
+[+] STRENGTHS
+2–4 lines, each starting with "- " (dash space). Each line is a single clause, ≤80 chars, phrased as a positive technical finding. Examples: "- Symmetry within elite envelope (BSI > 90)." "- Positive canthal tilt with bilateral consistency."
 
-- weaknesses: 2–4 short bullets, each a single clause. Phrase as deviations, not insults. e.g., "Mandibular angle softer than ideal (132° vs. 122°)." "Mid-third elongation outside one σ." Each ≤ 80 chars.
+[+] WEAKNESSES
+2–4 lines, same format. Each line is a single clause, ≤80 chars, phrased as a deviation, not an insult. Examples: "- Mandibular angle softer than ideal (132° vs. 122°)." "- Mid-third elongation outside one σ."
 
-- final_remark: One single-sentence deadpan remark, presented as the instrument's terminal note. Examples:
-  - "Specimen recommended for archival; phenotype within elite morphometric envelope."
-  - "Assessment complete. Compensatory grooming protocols may benefit lower-third presentation."
-  - "Vector trends positive. No further imaging required."
-  - "Proportional drift exceeds nominal threshold; classification stands."
-  - "Cranial morphology nominal. No deficiencies of clinical concern detected."
-  Do NOT use emoji. Keep ≤ 200 characters.
+[+] FINAL REMARK
+A single deadpan one-sentence terminal note from the instrument. ≤200 chars. Examples: "Specimen recommended for archival; phenotype within elite morphometric envelope." "Vector trends positive. No further imaging required."
 
-# CALIBRATION
+# TONAL CALIBRATION
 
 - A score in the 80s should not be congratulated profusely; the instrument issues findings, not compliments.
 - A score in the 40s should not be ridiculed; the instrument issues findings, not insults.
 - Always include at least one strength even at low scores, and at least one weakness even at high scores. There is no perfect specimen and no specimen without merit.
 - Reference the verdict tier in tone: a "MYTHICAL MOGGER" gets a faintly impressed instrument; a "PERMACHOPPED" gets a slightly resigned instrument. The tonal shift is subtle — never overt.
-- If image quality is poor (blur, occlusion, off-angle, partial face, lighting), say so once in observations and proceed with available data. Do not refuse to issue a report.
+- If image quality is poor (blur, occlusion, off-angle, partial face, lighting), say so once in OBSERVATIONS and proceed with available data. Do not refuse to issue a report.
 - If the photo does not show a human face (object, animal, drawing, etc.), still produce output in character — note that the specimen is "non-conforming" or "outside training distribution," issue plausible-sounding fake metrics commentary, and let the verdict stand. The instrument never breaks.
 - Never reference age, gender, or race of the specimen. Speak only of geometric and proportional characteristics.
+- Plain ASCII text. No markdown. No emoji. No exclamation points. Numbers reported to 1–2 decimal places where natural. Use ° for degrees. Use σ for standard deviations.
 
-# FORMATTING
-
-Plain ASCII text. No markdown headers. No emoji. No exclamation points. Numbers reported to 1–2 decimal places where natural. Use ° for degrees. Use σ for standard deviations. Use Greek letters where they appear in the metric descriptions (μ, σ, δ).
-
-Output is JSON conforming exactly to the supplied schema. No fields outside the schema. No commentary outside the JSON.`;
-
-const RESPONSE_SCHEMA = {
-  type: 'object',
-  properties: {
-    observations: { type: 'string', description: '4-6 sentences of integrated clinical prose synthesizing the strongest metric findings.' },
-    profile_inference: { type: 'string', description: '2-3 sentences inferring profile characteristics from the frontal view.' },
-    strengths: {
-      type: 'array',
-      items: { type: 'string' },
-      description: '2-4 short positive technical findings, each a single clause.',
-    },
-    weaknesses: {
-      type: 'array',
-      items: { type: 'string' },
-      description: '2-4 short deviation findings, each a single clause.',
-    },
-    final_remark: { type: 'string', description: 'Single deadpan one-sentence terminal note from the instrument.' },
-  },
-  required: ['observations', 'profile_inference', 'strengths', 'weaknesses', 'final_remark'],
-  additionalProperties: false,
-};
+Begin output with the literal characters \`[+] OBSERVATIONS\` on the first line.`;
 
 function buildUserText({ metrics, overall, verdict }) {
   const lines = [];
@@ -110,7 +87,7 @@ function buildUserText({ metrics, overall, verdict }) {
   lines.push(`Aggregate morphometric score: ${overall.toFixed(2)} / 100`);
   lines.push(`Issued classification: ${verdict.stamp} — ${verdict.tier} (${verdict.blurb})`);
   lines.push(``);
-  lines.push(`Photograph attached. Issue qualitative analysis layer per protocol. Output JSON conforming to schema.`);
+  lines.push(`Photograph attached. Issue qualitative analysis layer per protocol. Six sections, plain text, sigil format.`);
   return lines.join('\n');
 }
 
@@ -142,10 +119,23 @@ export default async function handler(req, res) {
   const mediaType = m ? m[1] : 'image/jpeg';
   const data = m ? m[2] : image_b64;
 
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  send('open', { ts: Date.now() });
+
   const client = new Anthropic();
 
   try {
-    const response = await client.messages.create({
+    const stream = client.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: [
@@ -155,50 +145,83 @@ export default async function handler(req, res) {
           cache_control: { type: 'ephemeral' },
         },
       ],
-      output_config: {
-        format: {
-          type: 'json_schema',
-          schema: RESPONSE_SCHEMA,
-        },
-      },
       messages: [
         {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data },
-            },
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
             { type: 'text', text: buildUserText({ metrics, overall, verdict }) },
           ],
         },
       ],
     });
 
-    const textBlock = response.content.find((b) => b.type === 'text');
-    if (!textBlock) {
-      return res.status(502).json({ error: 'No text in model response' });
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(textBlock.text);
-    } catch {
-      return res.status(502).json({ error: 'Model output not valid JSON', raw: textBlock.text.slice(0, 500) });
+    let full = '';
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        const t = event.delta.text;
+        full += t;
+        send('delta', { t });
+      }
     }
 
-    return res.status(200).json({
-      ...parsed,
-      _meta: {
-        model: response.model,
-        cache_read: response.usage?.cache_read_input_tokens ?? 0,
-        cache_write: response.usage?.cache_creation_input_tokens ?? 0,
-        input_tokens: response.usage?.input_tokens ?? 0,
-        output_tokens: response.usage?.output_tokens ?? 0,
+    const finalMsg = await stream.finalMessage();
+    const parsed = parseSections(full);
+
+    send('complete', {
+      result: parsed,
+      raw: full,
+      meta: {
+        model: finalMsg.model,
+        cache_read: finalMsg.usage?.cache_read_input_tokens ?? 0,
+        cache_write: finalMsg.usage?.cache_creation_input_tokens ?? 0,
+        input_tokens: finalMsg.usage?.input_tokens ?? 0,
+        output_tokens: finalMsg.usage?.output_tokens ?? 0,
       },
     });
+    res.end();
   } catch (err) {
     console.error('analyze error:', err);
-    const status = err?.status || 500;
-    return res.status(status).json({ error: err?.message || 'Analysis failure' });
+    send('error', { message: err?.message || 'Analysis failure' });
+    res.end();
   }
+}
+
+function parseSections(raw) {
+  // Sections delimited by lines starting with "[+] " in ALL CAPS.
+  const sections = {
+    observations: '',
+    profile_inference: '',
+    strengths: [],
+    weaknesses: [],
+    final_remark: '',
+  };
+
+  const lines = raw.split('\n');
+  let current = null;
+  const buf = { observations: [], profile_inference: [], strengths: [], weaknesses: [], final_remark: [] };
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^\[\+\]\s+OBSERVATIONS\b/i.test(t)) { current = 'observations'; continue; }
+    if (/^\[\+\]\s+PROFILE(\s+INFERENCE)?\b/i.test(t)) { current = 'profile_inference'; continue; }
+    if (/^\[\+\]\s+STRENGTHS\b/i.test(t)) { current = 'strengths'; continue; }
+    if (/^\[\+\]\s+WEAKNESSES\b/i.test(t)) { current = 'weaknesses'; continue; }
+    if (/^\[\+\]\s+(FINAL\s+REMARK|REMARK)\b/i.test(t)) { current = 'final_remark'; continue; }
+    if (!current) continue;
+    if (current === 'strengths' || current === 'weaknesses') {
+      const m = /^[-•]\s+(.*)$/.exec(t);
+      if (m) buf[current].push(m[1].trim());
+    } else {
+      buf[current].push(line);
+    }
+  }
+
+  sections.observations = buf.observations.join('\n').trim();
+  sections.profile_inference = buf.profile_inference.join('\n').trim();
+  sections.strengths = buf.strengths;
+  sections.weaknesses = buf.weaknesses;
+  sections.final_remark = buf.final_remark.join('\n').trim();
+
+  return sections;
 }
