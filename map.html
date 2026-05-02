@@ -76,7 +76,14 @@
     .legend .head { font-weight: 700; font-family: "Space Grotesk", sans-serif; letter-spacing: 0.05em; margin-bottom: 6px; font-size: 11px; }
     .legend .row { display: flex; align-items: center; gap: 8px; margin-top: 4px; color: var(--dim); }
     .legend .sw { width: 28px; height: 8px; border-radius: 2px; flex-shrink: 0; }
-    .legend .gradient { background: linear-gradient(90deg, #2ECF6B 0%, #FFEC2A 50%, #FF2A2A 100%); }
+    .legend .gradient { background: linear-gradient(90deg, #FF2A2A 0%, #FF8C2A 25%, #FFEC2A 50%, #9DD53A 75%, #2ECF6B 100%); }
+    .cae-tip {
+      background: rgba(5,5,5,0.92) !important; color: var(--fg) !important;
+      border: 1px solid var(--line) !important; border-radius: 0 !important;
+      font-family: "JetBrains Mono", monospace; font-size: 11px;
+      padding: 6px 8px !important;
+    }
+    .cae-tip::before { display: none !important; }
     .pane-overlay {
       position: fixed; inset: 0; pointer-events: none; z-index: 600;
       background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.35) 100%);
@@ -125,13 +132,12 @@
   <div class="legend">
     <span class="corner tl"></span><span class="corner tr"></span>
     <span class="corner bl"></span><span class="corner br"></span>
-    <div class="head">DENSITY · CFM-12</div>
-    <div class="row"><span class="sw gradient"></span> low → high</div>
-    <div class="row" style="margin-top:8px;color:var(--dim-2);">~1km bucket · ~110m source<br/>NO IMAGE · NO IDENTITY</div>
+    <div class="head">HOTNESS · CFM-12</div>
+    <div class="row"><span class="sw gradient"></span> CHOP → MID → MOG</div>
+    <div class="row" style="margin-top:8px;color:var(--dim-2);">color = avg mog-score · size = count<br/>~1km bucket · ~110m source<br/>NO IMAGE · NO IDENTITY</div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <script>
     const SUPABASE_URL = 'https://kqesemrxxymodmydgapf.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_lJLA1HvzC5vGktLNW4cb2Q_1lLTKng7';
@@ -148,14 +154,36 @@
       attribution: '© OSM · © CARTO',
     }).addTo(map);
 
-    const HEAT_OPTS = {
-      radius: 26, blur: 22, maxZoom: 12, minOpacity: 0.35,
-      gradient: { 0.2: '#2ECF6B', 0.55: '#FFEC2A', 0.85: '#FF2A2A' },
-    };
+    // Verdict-color ramp by avg mog-score. Stepped to match the app's
+    // verdict tiers — a cell's color tells you the dominant verdict in
+    // that bucket, regardless of how many submissions it contains.
+    function hotnessColor(avg) {
+      if (avg == null) return '#888888';
+      if (avg >= 74) return '#2ECF6B'; // CERTIFIED MOGGER+
+      if (avg >= 65) return '#9DD53A'; // MARGINAL MOGGER
+      if (avg >= 56) return '#FFEC2A'; // MID
+      if (avg >= 46) return '#FF8C2A'; // MARGINAL CHOP
+      return '#FF2A2A';                // HARD CHOP / PERMACHOPPED
+    }
+    function verdictColor(key) {
+      return key === 'mog' ? '#2ECF6B' : key === 'mid' ? '#FFEC2A' : '#FF2A2A';
+    }
 
     let layers = { all: null, mog: null, mid: null, chop: null };
     let activeFilter = 'all';
     let totalRecords = 0;
+
+    // Frame the map to whatever data is in the corpus. Capped at zoom 6 so a
+    // single point still reads as regional context rather than a street view.
+    function fitToData(points) {
+      if (!points.length) return;
+      const latlngs = points
+        .map(p => [Number(p.lat), Number(p.lng)])
+        .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
+      if (!latlngs.length) return;
+      const bounds = L.latLngBounds(latlngs);
+      map.fitBounds(bounds, { padding: [80, 80], maxZoom: 6, animate: false });
+    }
 
     async function rpc(fn, body = {}) {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
@@ -171,17 +199,40 @@
       return res.json();
     }
 
+    // One circle per cell. Color = hotness (avg mog-score for ALL, single
+    // verdict color for filtered views). Radius = density (log scale).
+    // The leaflet.heat radial-fade was misleading — it made every cell
+    // read as red on its outer ring regardless of its actual avg, so we
+    // ditched it for honest discrete dots.
     function buildLayer(points, key) {
-      const data = points
-        .map(p => {
-          const w = key === 'all' ? Number(p.total)
-            : key === 'mog' ? Number(p.mog_count)
-            : key === 'mid' ? Number(p.mid_count)
-            : Number(p.chop_count);
-          return w > 0 ? [Number(p.lat), Number(p.lng), Math.log10(w + 1)] : null;
-        })
-        .filter(Boolean);
-      return L.heatLayer(data, HEAT_OPTS);
+      const layer = L.layerGroup();
+      for (const p of points) {
+        const lat = Number(p.lat), lng = Number(p.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        let count, color;
+        if (key === 'all') {
+          count = Number(p.total);
+          color = hotnessColor(Number(p.avg_overall));
+        } else {
+          const k = key === 'mog' ? 'mog_count' : key === 'mid' ? 'mid_count' : 'chop_count';
+          count = Number(p[k]);
+          if (count === 0) continue;
+          color = verdictColor(key);
+        }
+        const r = 8 + Math.min(28, Math.log2(count + 1) * 5);
+        L.circleMarker([lat, lng], {
+          radius: r,
+          color,
+          fillColor: color,
+          fillOpacity: 0.55,
+          opacity: 0.95,
+          weight: 1.5,
+        }).bindTooltip(
+          `<b>N=${count}</b>${key === 'all' ? `<br>avg=${Number(p.avg_overall).toFixed(1)}<br>MOG ${p.mog_count} · MID ${p.mid_count} · CHOP ${p.chop_count}` : ''}`,
+          { direction: 'top', opacity: 0.92, className: 'cae-tip' }
+        ).addTo(layer);
+      }
+      return layer;
     }
 
     function setFilter(name) {
@@ -226,6 +277,7 @@
         layers.mid = buildLayer(points, 'mid');
         layers.chop = buildLayer(points, 'chop');
         layers.all.addTo(map);
+        fitToData(points);
       } catch (e) {
         console.error('heatmap fetch failed', e);
       }
