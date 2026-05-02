@@ -272,10 +272,12 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const fmt = (n, d=2) => (n == null || isNaN(n)) ? '—' : Number(n).toFixed(d);
 
 // Score a measurement against an ideal (μ) with tolerance (σ).
-// Score = 100 - 28 * |z|, clamped 5..98, where z = (v - μ)/σ.
+// Score = 100 - 24 * |z|, clamped 5..98, where z = (v - μ)/σ. Slope was 28
+// pre-v1.6; lowered after telemetry showed a "chad-filtered" specimen still
+// landed in MID. New curve: z=0.5→88, z=1.0→76, z=1.5→64, z=2.0→52.
 const score = (v, mu, sigma) => {
   const z = (v - mu) / sigma;
-  return clamp(100 - 28 * Math.abs(z), 5, 98);
+  return clamp(100 - 24 * Math.abs(z), 5, 98);
 };
 
 // ---- Hex / patient code -------------------------------------------------
@@ -394,7 +396,7 @@ function computeMetrics(lm, imgW, imgH) {
   const M = [
     { id: 'symmetry',     label: 'Bilateral Symmetry Index',  value: symmetryScore,  unit: 'BSI',   mu: 92,   sigma: 8,    w: 0.16, isScore: true },
     { id: 'canthal',      label: 'Mean Canthal Tilt',         value: canthalTilt,    unit: '°',     mu: 4.0,  sigma: 3.5,  w: 0.10 },
-    { id: 'bgBz',         label: 'Bigonial/Bizygomatic',      value: bgBz,           unit: '',      mu: 0.78, sigma: 0.07, w: 0.10 },
+    { id: 'bgBz',         label: 'Bigonial/Bizygomatic',      value: bgBz,           unit: '',      mu: 0.78, sigma: 0.10, w: 0.10 },
     { id: 'thirds',       label: 'Facial Thirds Deviation',   value: thirdsDev,      unit: 'σ',     mu: 0.025,sigma: 0.03, w: 0.08, lowerBetter: true },
     { id: 'fifths',       label: 'Facial Fifths Ratio',       value: fifthsRatio,    unit: '',      mu: 1.0,  sigma: 0.10, w: 0.07 },
     { id: 'interCanthal', label: 'Inter-Canthal / Eye Width', value: ic_eyeW,        unit: '',      mu: 1.0,  sigma: 0.10, w: 0.06 },
@@ -402,8 +404,8 @@ function computeMetrics(lm, imgW, imgH) {
     { id: 'mouthNose',    label: 'Stomion / Alar Ratio',      value: mouthNose,      unit: '',      mu: 1.55, sigma: 0.20, w: 0.06 },
     { id: 'philtrum',     label: 'Philtral Index',            value: philRatio,      unit: '',      mu: 0.30, sigma: 0.06, w: 0.05 },
     { id: 'nose',         label: 'Naso-Facial Length',        value: noseFace,       unit: '',      mu: 0.38, sigma: 0.05, w: 0.06 },
-    { id: 'brow',         label: 'Brow Arch Elevation',       value: browArch,       unit: '',      mu: 0.018,sigma: 0.012,w: 0.05 },
-    { id: 'mandible',     label: 'Mandibular Gonial Angle',   value: mandAngle,      unit: '°',     mu: 122,  sigma: 8,    w: 0.10 },
+    { id: 'brow',         label: 'Brow Arch Elevation',       value: browArch,       unit: '',      mu: 0.018,sigma: 0.018,w: 0.05 },
+    { id: 'mandible',     label: 'Mandibular Gonial Angle',   value: mandAngle,      unit: '°',     mu: 122,  sigma: 10,   w: 0.10 },
   ];
 
   // Score each
@@ -425,13 +427,16 @@ function computeMetrics(lm, imgW, imgH) {
 }
 
 // ---- Verdict tiers -------------------------------------------------------
+// Thresholds lowered in v1.6 alongside the score-curve softening so a typical
+// chad-filtered specimen lands at MARGINAL MOGGER rather than MID. MYTHICAL
+// stays rare (intentionally elite); MID is now narrower (56–64).
 function verdictFor(overall) {
-  if (overall >= 88) return { stamp: 'MOG', tier: 'MYTHICAL MOGGER',     side: 'mog',  blurb: 'phenotype borderline-anomalous' };
-  if (overall >= 78) return { stamp: 'MOG', tier: 'CERTIFIED MOGGER',    side: 'mog',  blurb: 'morphometrics within elite envelope' };
-  if (overall >= 70) return { stamp: 'MOG', tier: 'MARGINAL MOGGER',     side: 'mog',  blurb: 'aesthetic vector trending positive' };
-  if (overall >= 62) return { stamp: 'MID', tier: 'MORPHOLOGICAL MID',   side: 'mid',  blurb: 'no decisive gradient detected' };
-  if (overall >= 52) return { stamp: 'CHOP',tier: 'MARGINAL CHOP',       side: 'chop', blurb: 'sub-canonical proportional drift' };
-  if (overall >= 40) return { stamp: 'CHOP',tier: 'HARD CHOP',           side: 'chop', blurb: 'multiple deviations from norm exceed σ' };
+  if (overall >= 86) return { stamp: 'MOG', tier: 'MYTHICAL MOGGER',     side: 'mog',  blurb: 'phenotype borderline-anomalous' };
+  if (overall >= 74) return { stamp: 'MOG', tier: 'CERTIFIED MOGGER',    side: 'mog',  blurb: 'morphometrics within elite envelope' };
+  if (overall >= 65) return { stamp: 'MOG', tier: 'MARGINAL MOGGER',     side: 'mog',  blurb: 'aesthetic vector trending positive' };
+  if (overall >= 56) return { stamp: 'MID', tier: 'MORPHOLOGICAL MID',   side: 'mid',  blurb: 'no decisive gradient detected' };
+  if (overall >= 46) return { stamp: 'CHOP',tier: 'MARGINAL CHOP',       side: 'chop', blurb: 'sub-canonical proportional drift' };
+  if (overall >= 36) return { stamp: 'CHOP',tier: 'HARD CHOP',           side: 'chop', blurb: 'multiple deviations from norm exceed σ' };
   return                { stamp: 'CHOP',tier: 'PERMACHOPPED',         side: 'chop', blurb: 'phenotype severely off-axis' };
 }
 
