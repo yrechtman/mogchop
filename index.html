@@ -272,12 +272,14 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const fmt = (n, d=2) => (n == null || isNaN(n)) ? '—' : Number(n).toFixed(d);
 
 // Score a measurement against an ideal (μ) with tolerance (σ).
-// Score = 100 - 24 * |z|, clamped 5..98, where z = (v - μ)/σ. Slope was 28
-// pre-v1.6; lowered after telemetry showed a "chad-filtered" specimen still
-// landed in MID. New curve: z=0.5→88, z=1.0→76, z=1.5→64, z=2.0→52.
+// Score = 100 - 28 * |z|, clamped 5..98, where z = (v - μ)/σ.
+// v1.9 calibration target: typical specimens land in MID. The σ widening
+// from v1.6 stays (it kept the curve fair on harshly-tight indices); slope
+// returns to 28 so weighted overalls cluster in 50-69 for a normal face.
+// Curve: z=0.5→86, z=1.0→72, z=1.5→58, z=2.0→44.
 const score = (v, mu, sigma) => {
   const z = (v - mu) / sigma;
-  return clamp(100 - 24 * Math.abs(z), 5, 98);
+  return clamp(100 - 28 * Math.abs(z), 5, 98);
 };
 
 // ---- Hex / patient code -------------------------------------------------
@@ -427,16 +429,18 @@ function computeMetrics(lm, imgW, imgH) {
 }
 
 // ---- Verdict tiers -------------------------------------------------------
-// Thresholds lowered in v1.6 alongside the score-curve softening so a typical
-// chad-filtered specimen lands at MARGINAL MOGGER rather than MID. MYTHICAL
-// stays rare (intentionally elite); MID is now narrower (56–64).
+// MID is the wide common band by design: most specimens should land here.
+// MOG is for genuinely-on-axis morphometrics; CHOP for genuinely off-axis.
+// Range layout (v1.9):  PERMA <24 · HARD <36 · MARGINAL CHOP <50
+//                       MORPHOLOGICAL MID  50–69  ← the target zone
+//                       MARGINAL MOGGER ≥70 · CERTIFIED ≥78 · MYTHICAL ≥88
 function verdictFor(overall) {
-  if (overall >= 86) return { stamp: 'MOG', tier: 'MYTHICAL MOGGER',     side: 'mog',  blurb: 'phenotype borderline-anomalous' };
-  if (overall >= 74) return { stamp: 'MOG', tier: 'CERTIFIED MOGGER',    side: 'mog',  blurb: 'morphometrics within elite envelope' };
-  if (overall >= 65) return { stamp: 'MOG', tier: 'MARGINAL MOGGER',     side: 'mog',  blurb: 'aesthetic vector trending positive' };
-  if (overall >= 56) return { stamp: 'MID', tier: 'MORPHOLOGICAL MID',   side: 'mid',  blurb: 'no decisive gradient detected' };
-  if (overall >= 46) return { stamp: 'CHOP',tier: 'MARGINAL CHOP',       side: 'chop', blurb: 'sub-canonical proportional drift' };
-  if (overall >= 36) return { stamp: 'CHOP',tier: 'HARD CHOP',           side: 'chop', blurb: 'multiple deviations from norm exceed σ' };
+  if (overall >= 88) return { stamp: 'MOG', tier: 'MYTHICAL MOGGER',     side: 'mog',  blurb: 'phenotype borderline-anomalous' };
+  if (overall >= 78) return { stamp: 'MOG', tier: 'CERTIFIED MOGGER',    side: 'mog',  blurb: 'morphometrics within elite envelope' };
+  if (overall >= 70) return { stamp: 'MOG', tier: 'MARGINAL MOGGER',     side: 'mog',  blurb: 'aesthetic vector trending positive' };
+  if (overall >= 50) return { stamp: 'MID', tier: 'MORPHOLOGICAL MID',   side: 'mid',  blurb: 'no decisive gradient detected' };
+  if (overall >= 36) return { stamp: 'CHOP',tier: 'MARGINAL CHOP',       side: 'chop', blurb: 'sub-canonical proportional drift' };
+  if (overall >= 24) return { stamp: 'CHOP',tier: 'HARD CHOP',           side: 'chop', blurb: 'multiple deviations from norm exceed σ' };
   return                { stamp: 'CHOP',tier: 'PERMACHOPPED',         side: 'chop', blurb: 'phenotype severely off-axis' };
 }
 
