@@ -48,7 +48,7 @@ The 12 indices and what they measure:
 
 # OUTPUT FORMAT — STRICT
 
-Output PLAIN TEXT only, with the following six sections in order. No JSON. No markdown headers. No preamble. The section markers must appear EXACTLY as written, on their own line, in ALL CAPS with the leading [+] sigil:
+Output PLAIN TEXT only, with the following SEVEN sections in order. No JSON. No markdown headers. No preamble. The section markers must appear EXACTLY as written, on their own line, in ALL CAPS with the leading [+] sigil:
 
 [+] OBSERVATIONS
 3–5 sentences of clinical prose. Synthesize the 2–3 most informative metrics — strongest deviations OR strongest performances, whichever the data shows. Reference actual values where they add rigor. Identical register regardless of verdict: "BSI of 87.4 places the specimen in the upper quartile of bilateral fidelity. Canthal tilt at +5.8° is consistent with positive periorbital orientation." or: "Bigonial/bizygomatic ratio of 0.92 indicates a wider lower-face envelope than the canonical 0.78. Mandibular angle at 138° is softer than ideal." Do not list every metric. Do not pile on. State what the geometry shows.
@@ -61,6 +61,34 @@ Output PLAIN TEXT only, with the following six sections in order. No JSON. No ma
 
 [+] WEAKNESSES
 2–4 lines, same format. Each line is a single deviation, ≤80 chars, named with values where they sharpen the finding. Even elite specimens get at least one named deviation. Examples: "- Mandibular angle softer than ideal (132° vs. 122°)." "- Mid-third elongation outside one σ."
+
+[+] FACULTY READINGS
+5–7 lines, each starting with "- " (dash space). Each line names a phrenological FACULTY in ALL CAPS, reports a score 0–100, and gives a single-clause clinical justification tying the score to a specific morphometric finding. Format strictly:
+
+  - FACULTY: SS — clinical justification.
+  Example: "- CAUSALITY: 64 — frontal occupies 0.34 of facial height, within elevated analytical envelope."
+  Example: "- COMBATIVENESS: 78 — gonial angle at 124° approaches canonical pugilistic ratio."
+
+The instrument treats Victorian phrenology with the same deadpan rigor as the actual morphometrics. The bit is the absurd specificity, not mockery. Score is plausibly derived from the underlying metric — high metric score → faculty score in the same direction.
+
+Pick 5–7 from this faculty / metric mapping; choose the ones whose underlying metric is most informative on this specimen. NEVER fabricate a faculty not in this list.
+
+  - CAUSALITY        ← upper-third proportion (forehead height)
+  - COMBATIVENESS    ← mandibular gonial angle (sharper → higher)
+  - ACQUISITIVENESS  ← bigonial / bizygomatic ratio (wider lower face → higher)
+  - IDEALITY         ← brow arch elevation
+  - VENERATION       ← philtral index (elongated → higher)
+  - SELF-ESTEEM      ← naso-facial length
+  - AMATIVENESS      ← vermilion ratio
+  - MIRTHFULNESS     ← stomion / alar ratio
+  - CONCENTRATIVENESS← inter-canthal / eye width (narrower → higher focus)
+  - FIRMNESS         ← bilateral symmetry index
+  - CAUTIOUSNESS     ← canthal tilt (negative tilt → higher)
+  - ORDER            ← facial fifths regularity
+  - LANGUAGE         ← canthal tilt + orbital prominence (positive tilt → higher)
+  - COMPARISON       ← symmetry + facial thirds equality
+
+Treat faculties as derived from morphometrics ONLY. Do not infer from race, gender, age, expression, attire, lighting, or anything outside the geometric mesh. Phrenology is bunk; we are reporting it with the deadpan certainty of an instrument that doesn't know that.
 
 [+] FINAL REMARK
 A single deadpan sentence echoing the verdict tier. ≤180 chars. Examples:
@@ -204,12 +232,13 @@ function parseSections(raw) {
     profile_inference: '',
     strengths: [],
     weaknesses: [],
+    faculties: [],
     final_remark: '',
   };
 
   const lines = raw.split('\n');
   let current = null;
-  const buf = { observations: [], profile_inference: [], strengths: [], weaknesses: [], final_remark: [] };
+  const buf = { observations: [], profile_inference: [], strengths: [], weaknesses: [], faculties: [], final_remark: [] };
 
   for (const line of lines) {
     const t = line.trim();
@@ -217,9 +246,10 @@ function parseSections(raw) {
     if (/^\[\+\]\s+PROFILE(\s+INFERENCE)?\b/i.test(t)) { current = 'profile_inference'; continue; }
     if (/^\[\+\]\s+STRENGTHS\b/i.test(t)) { current = 'strengths'; continue; }
     if (/^\[\+\]\s+WEAKNESSES\b/i.test(t)) { current = 'weaknesses'; continue; }
+    if (/^\[\+\]\s+(FACULTY\s+READINGS|FACULTIES|PHRENOLOG\w*)\b/i.test(t)) { current = 'faculties'; continue; }
     if (/^\[\+\]\s+(FINAL\s+REMARK|REMARK)\b/i.test(t)) { current = 'final_remark'; continue; }
     if (!current) continue;
-    if (current === 'strengths' || current === 'weaknesses') {
+    if (current === 'strengths' || current === 'weaknesses' || current === 'faculties') {
       const m = /^[-•]\s+(.*)$/.exec(t);
       if (m) buf[current].push(m[1].trim());
     } else {
@@ -231,6 +261,7 @@ function parseSections(raw) {
   sections.profile_inference = buf.profile_inference.join('\n').trim();
   sections.strengths = buf.strengths;
   sections.weaknesses = buf.weaknesses;
+  sections.faculties = buf.faculties;
   sections.final_remark = buf.final_remark.join('\n').trim();
 
   return sections;

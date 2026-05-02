@@ -815,19 +815,20 @@ function getCoarseLocation() {
 
 // ---- Live section parser (mirrors api/analyze.js parseSections) ----------
 function parseLiveSections(raw) {
-  const out = { observations: '', profile_inference: '', strengths: [], weaknesses: [], final_remark: '' };
+  const out = { observations: '', profile_inference: '', strengths: [], weaknesses: [], faculties: [], final_remark: '' };
   const lines = raw.split('\n');
   let current = null;
-  const buf = { observations: [], profile_inference: [], strengths: [], weaknesses: [], final_remark: [] };
+  const buf = { observations: [], profile_inference: [], strengths: [], weaknesses: [], faculties: [], final_remark: [] };
   for (const line of lines) {
     const t = line.trim();
     if (/^\[\+\]\s+OBSERVATIONS\b/i.test(t)) { current = 'observations'; continue; }
     if (/^\[\+\]\s+PROFILE(\s+INFERENCE)?\b/i.test(t)) { current = 'profile_inference'; continue; }
     if (/^\[\+\]\s+STRENGTHS\b/i.test(t)) { current = 'strengths'; continue; }
     if (/^\[\+\]\s+WEAKNESSES\b/i.test(t)) { current = 'weaknesses'; continue; }
+    if (/^\[\+\]\s+(FACULTY\s+READINGS|FACULTIES|PHRENOLOG\w*)\b/i.test(t)) { current = 'faculties'; continue; }
     if (/^\[\+\]\s+(FINAL\s+REMARK|REMARK)\b/i.test(t)) { current = 'final_remark'; continue; }
     if (!current) continue;
-    if (current === 'strengths' || current === 'weaknesses') {
+    if (current === 'strengths' || current === 'weaknesses' || current === 'faculties') {
       const m = /^[-•]\s+(.*)$/.exec(t);
       if (m) buf[current].push(m[1].trim());
     } else {
@@ -838,6 +839,7 @@ function parseLiveSections(raw) {
   out.profile_inference = buf.profile_inference.join('\n').trim();
   out.strengths = buf.strengths;
   out.weaknesses = buf.weaknesses;
+  out.faculties = buf.faculties;
   out.final_remark = buf.final_remark.join('\n').trim();
   return out;
 }
@@ -1342,6 +1344,14 @@ const Result = ({ scan, onNew, onShare, onRetryTelemetry }) => {
                 </ul>
               </div>
             )}
+            {scan.commentary?.faculties?.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
+                <div className="label mb-1 text-[var(--amber)]">⌬ PHRENOLOGICAL FACULTIES</div>
+                <ul className="text-[12px] space-y-0.5">
+                  {scan.commentary.faculties.map((s, i) => <li key={i}>· {s}</li>)}
+                </ul>
+              </div>
+            )}
             {scan.commentary?.final_remark && (
               <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
                 <div className="label mb-1">// TERMINAL NOTE</div>
@@ -1626,7 +1636,7 @@ const App = () => {
         metrics: M.metrics.map(({ id, label, value, unit, mu, sigma, z, score, isScore }) => ({ id, label, value, unit, mu, sigma, z, score, isScore })),
         thumbnail: thumb,
         annotated,
-        commentary: { observations: '', profile_inference: '', strengths: [], weaknesses: [], final_remark: '' },
+        commentary: { observations: '', profile_inference: '', strengths: [], weaknesses: [], faculties: [], final_remark: '' },
         streaming: true,
       };
       setScan(baseRecord);

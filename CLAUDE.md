@@ -144,13 +144,28 @@ strict sectioned plaintext:
 [+] PROFILE INFERENCE
 [+] STRENGTHS
 [+] WEAKNESSES
+[+] FACULTY READINGS    ← Victorian phrenology, deadpan
 [+] FINAL REMARK
 ```
 
 Streamed to the client via SSE deltas; client parses incrementally and renders
 each section as it fills in. The system prompt explicitly bars age/gender/race
-commentary, slurs, and dating-market language. Tone is "clinical contempt for
-deviation, not contempt for the person."
+commentary, slurs, and dating-market language. Tone is even-handed clinical
+observation — the verdict tier carries the punchline.
+
+The phrenology section maps facial morphometrics to Victorian "faculties"
+(CAUSALITY, COMBATIVENESS, ACQUISITIVENESS, IDEALITY, VENERATION, SELF-ESTEEM,
+AMATIVENESS, MIRTHFULNESS, CONCENTRATIVENESS, FIRMNESS, CAUTIOUSNESS, ORDER,
+LANGUAGE, COMPARISON). The bit is the absurd specificity of treating bunk with
+the same rigor as the actual metrics. Faculties are derived from morphometric
+values ONLY — never from race, gender, age, expression, or anything outside
+the geometric mesh. The model is instructed not to fabricate faculties outside
+the mapping list.
+
+If you add or rename a section, update BOTH parsers (server-side
+`parseSections` in `api/analyze.js` and client-side `parseLiveSections` in
+`index.html`) AND the commentary state initializer in `handleAnalyze`'s
+`baseRecord`.
 
 ## Important gotchas (read before debugging)
 
