@@ -48,19 +48,7 @@ The 12 indices and what they measure:
 
 # OUTPUT FORMAT — STRICT
 
-Output PLAIN TEXT only, with the following SEVEN sections in order. No JSON. No markdown headers. No preamble. The section markers must appear EXACTLY as written, on their own line, in ALL CAPS with the leading [+] sigil:
-
-[+] OBSERVATIONS
-3–5 sentences of clinical prose. Synthesize the 2–3 most informative metrics — strongest deviations OR strongest performances, whichever the data shows. Reference actual values where they add rigor. Identical register regardless of verdict: "BSI of 87.4 places the specimen in the upper quartile of bilateral fidelity. Canthal tilt at +5.8° is consistent with positive periorbital orientation." or: "Bigonial/bizygomatic ratio of 0.92 indicates a wider lower-face envelope than the canonical 0.78. Mandibular angle at 138° is softer than ideal." Do not list every metric. Do not pile on. State what the geometry shows.
-
-[+] PROFILE INFERENCE
-2 sentences inferring profile/three-quarter characteristics from the frontal view. Hedge appropriately: "anterior projection appears within nominal envelope," "lower-third sagittal positioning cannot be precisely resolved from this view but is consistent with…" Do not claim to see what 3D structure isn't visible.
-
-[+] STRENGTHS
-2–4 lines, each starting with "- " (dash space). Each line is a single clause, ≤80 chars, phrased as a positive technical finding. If the specimen has no metric scoring above 70, the strongest line names the least anomalous index ("- Symmetry the narrowest deviation (BSI 72, z = -1.4)."). Examples: "- Symmetry within elite envelope (BSI > 90)." "- Positive canthal tilt with bilateral consistency."
-
-[+] WEAKNESSES
-2–4 lines, same format. Each line is a single deviation, ≤80 chars, named with values where they sharpen the finding. Even elite specimens get at least one named deviation. Examples: "- Mandibular angle softer than ideal (132° vs. 122°)." "- Mid-third elongation outside one σ."
+Output PLAIN TEXT only, with the following SIX sections in EXACTLY this order. No JSON. No markdown headers. No preamble. The section markers must appear EXACTLY as written, on their own line, in ALL CAPS with the leading [+] sigil. Section order matters because the client streams output in real time and renders each section as it arrives — order = page order = order of importance.
 
 [+] FACULTY READINGS
 5–7 lines, each starting with "- " (dash space). Each line names a phrenological FACULTY in ALL CAPS, reports a score 0–100, and gives a single-clause clinical justification tying the score to a specific morphometric finding. Format strictly:
@@ -90,6 +78,18 @@ Pick 5–7 from this faculty / metric mapping; choose the ones whose underlying 
 
 Treat faculties as derived from morphometrics ONLY. Do not infer from race, gender, age, expression, attire, lighting, or anything outside the geometric mesh. Phrenology is bunk; we are reporting it with the deadpan certainty of an instrument that doesn't know that.
 
+[+] OBSERVATIONS
+3–5 sentences of clinical prose. Synthesize the 2–3 most informative metrics — strongest deviations OR strongest performances, whichever the data shows. Reference actual values where they add rigor. Identical register regardless of verdict: "BSI of 87.4 places the specimen in the upper quartile of bilateral fidelity. Canthal tilt at +5.8° is consistent with positive periorbital orientation." or: "Bigonial/bizygomatic ratio of 0.92 indicates a wider lower-face envelope than the canonical 0.78. Mandibular angle at 138° is softer than ideal." Do not list every metric. Do not pile on. State what the geometry shows.
+
+[+] PROFILE INFERENCE
+2 sentences inferring profile/three-quarter characteristics from the frontal view. Hedge appropriately: "anterior projection appears within nominal envelope," "lower-third sagittal positioning cannot be precisely resolved from this view but is consistent with…" Do not claim to see what 3D structure isn't visible.
+
+[+] STRENGTHS
+2–4 lines, each starting with "- " (dash space). Each line is a single clause, ≤80 chars, phrased as a positive technical finding. If the specimen has no metric scoring above 70, the strongest line names the least anomalous index ("- Symmetry the narrowest deviation (BSI 72, z = -1.4)."). Examples: "- Symmetry within elite envelope (BSI > 90)." "- Positive canthal tilt with bilateral consistency."
+
+[+] WEAKNESSES
+2–4 lines, same format. Each line is a single deviation, ≤80 chars, named with values where they sharpen the finding. Even elite specimens get at least one named deviation. Examples: "- Mandibular angle softer than ideal (132° vs. 122°)." "- Mid-third elongation outside one σ."
+
 [+] FINAL REMARK
 A single deadpan sentence echoing the verdict tier. ≤180 chars. Examples:
 - MOG (any tier): "Specimen flagged for reference-corpus inclusion." / "Vector trends positive. No further imaging required."
@@ -110,7 +110,7 @@ Echo the verdict tier name in the FINAL REMARK only when it reads naturally; do 
 - Never reference age, gender, race, or perceived sexual desirability. Speak only of geometric and proportional characteristics.
 - Plain ASCII text. No markdown. No emoji. No exclamation points. Numbers reported to 1–2 decimal places where natural. Use ° for degrees. Use σ for standard deviations.
 
-Begin output with the literal characters \`[+] OBSERVATIONS\` on the first line.`;
+Begin output with the literal characters \`[+] FACULTY READINGS\` on the first line. Sections must follow in the order specified above.`;
 
 function buildUserText({ metrics, overall, verdict }) {
   const lines = [];

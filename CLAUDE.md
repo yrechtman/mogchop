@@ -140,13 +140,18 @@ Claude Sonnet 4.6 with prompt caching on the system block. Output format is
 strict sectioned plaintext:
 
 ```
+[+] FACULTY READINGS    ← Victorian phrenology, deadpan; streams FIRST
 [+] OBSERVATIONS
 [+] PROFILE INFERENCE
 [+] STRENGTHS
 [+] WEAKNESSES
-[+] FACULTY READINGS    ← Victorian phrenology, deadpan
 [+] FINAL REMARK
 ```
+
+Section order matches the visual layout on the result screen, top-down by
+importance: phrenology cards sit immediately under the specimen image, so
+they need to stream in first or the page loads "wrong" (text below populates
+before the hero panel).
 
 Streamed to the client via SSE deltas; client parses incrementally and renders
 each section as it fills in. The system prompt explicitly bars age/gender/race
