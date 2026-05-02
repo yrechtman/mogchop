@@ -888,7 +888,7 @@ const Intake = ({ onCamera, onPick, history, onOpenHistory }) => {
       <Marquee items={[
         'CRANIAL ANALYSIS ENGINE v1.0', 'FACE MESH 468pt', 'MEDIA-PIPELINE TASKS-VISION 0.10',
         'BILATERAL SYMMETRY · CANTHAL TILT · BIGONIAL/BIZYGOMATIC',
-        'NO DATA TRANSMITTED EXCEPT FOR ANALYSIS', 'INSTRUMENT-GRADE MORPHOMETRY'
+        'IMAGE NEVER LEAVES DEVICE', 'GEO-TAGGED CORPUS · ~110m PRECISION', 'INSTRUMENT-GRADE MORPHOMETRY'
       ]} />
       <main className="px-4 py-6 max-w-md mx-auto">
         <div className="panel mb-6 p-5 relative">
@@ -913,10 +913,13 @@ const Intake = ({ onCamera, onPick, history, onOpenHistory }) => {
           <ol className="text-[var(--dim)] text-[12px] mt-2 space-y-1.5 pl-1">
             <li>01  · Frame face frontally, neutral expression, level gaze.</li>
             <li>02  · Capture or upload — single subject only.</li>
-            <li>03  · Mesh extraction & metric computation (≈1.5s).</li>
+            <li>03  · Mesh extraction &amp; metric computation (≈1.5s).</li>
             <li>04  · Vision-grade qualitative analysis layer.</li>
-            <li>05  · Verdict issued, dossier stored locally.</li>
+            <li>05  · Verdict issued; record archived to global corpus.</li>
           </ol>
+          <div className="text-[10px] text-[var(--dim-2)] mt-3 leading-snug">
+            Image never leaves your device. Geolocation (rounded to ~110m) is attached to the verdict and score for the global heatmap. Permission requested on capture.
+          </div>
         </div>
 
         <input
@@ -1203,87 +1206,45 @@ const Scanning = ({ image, metrics, progress, statusLines, scanId }) => {
   );
 };
 
-// ---- Telemetry panel (corpus submission) ---------------------------------
-const TelemetryPanel = ({ scan }) => {
-  const [state, setState] = useState('idle');
-  // idle | requesting | submitting | sent_geo | sent_anon | error
-  const verdictColor = scan.verdict.side === 'mog' ? 'text-[var(--green)]'
-    : scan.verdict.side === 'chop' ? 'text-[var(--red)]' : 'text-[var(--amber)]';
-
-  const transmit = async (withGeo) => {
-    let lat = null, lng = null;
-    if (withGeo) {
-      setState('requesting');
-      const pos = await getCoarseLocation();
-      if (pos) { lat = pos.lat; lng = pos.lng; }
-    }
-    setState('submitting');
-    const ok = await submitScan({ scan, lat, lng });
-    setState(ok ? (lat != null ? 'sent_geo' : 'sent_anon') : 'error');
-  };
-
+// ---- Telemetry status (passive archive indicator) ------------------------
+// Submission happens automatically in handleAnalyze. This component only
+// reflects the current state of the in-flight / completed transmission.
+const TelemetryStatus = ({ scan, onRetry }) => {
+  const t = scan.telemetry || { state: 'idle' };
+  const { state, withGeo } = t;
   return (
-    <div className="panel p-4 mb-3 relative">
+    <div className="panel p-3 mb-3 relative">
       <span className="corner tl"></span><span className="corner tr"></span>
       <span className="corner bl"></span><span className="corner br"></span>
-      <div className="flex items-center justify-between mb-2">
-        <span className="label">// CORPUS SUBMISSION</span>
-        {state === 'idle' && <span className="label text-[var(--dim)]">UNTRANSMITTED</span>}
-        {state === 'requesting' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--amber)] pulse-dot"></span>ACQUIRING</span>}
-        {state === 'submitting' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)] pulse-dot"></span>UPLINKING</span>}
-        {state === 'sent_geo' && <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--green)]"></span>TRANSMITTED · GEO</span>}
-        {state === 'sent_anon' && <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--amber)]"></span>TRANSMITTED · NO GEO</span>}
+      <div className="flex items-center justify-between">
+        <span className="label">// CORPUS · CFM-12</span>
+        {state === 'pending' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)] pulse-dot"></span>UPLINKING</span>}
+        {state === 'sent' && withGeo && <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--green)]"></span>ARCHIVED · GEO</span>}
+        {state === 'sent' && !withGeo && <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--amber)]"></span>ARCHIVED · ANON</span>}
         {state === 'error' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]"></span>FAULT</span>}
+        {(!state || state === 'idle') && <span className="label text-[var(--dim)]">QUEUED</span>}
       </div>
-
-      {state === 'idle' && (
-        <>
-          <div className="text-[12px] leading-relaxed text-[var(--dim)] mb-3">
-            Specimen verdict (<span className={verdictColor}>{scan.verdict.stamp}</span> · {scan.overall.toFixed(1)}) may be filed to the global CFM-12 corpus. Geolocation rounded to ~110m before transmission. No image, no identity.
-          </div>
-          <button className="btn mb-2" onClick={() => transmit(true)}>
-            <span>▸ TRANSMIT WITH GEOLOCATION</span>
-            <span className="opacity-50">↗</span>
-          </button>
-          <button className="btn btn-ghost" onClick={() => transmit(false)}>
-            <span>TRANSMIT ANONYMOUSLY</span>
-            <span className="opacity-50">+</span>
-          </button>
-        </>
-      )}
-      {(state === 'requesting' || state === 'submitting') && (
-        <div className="text-[12px] text-[var(--dim)]">
-          {state === 'requesting' ? 'awaiting geolocation handshake…' : 'committing record to corpus…'}
-        </div>
-      )}
-      {(state === 'sent_geo' || state === 'sent_anon') && (
-        <>
-          <div className={`text-[12px] leading-relaxed ${verdictColor} mb-3`}>
-            Record archived. {state === 'sent_geo' ? 'Coordinates fixed at 110m envelope.' : 'No coordinates attached.'}
-          </div>
-          <a href="/map.html" className="btn">
-            <span>▸ VIEW CORPUS HEATMAP</span>
-            <span className="opacity-50">↗</span>
-          </a>
-        </>
-      )}
-      {state === 'error' && (
-        <>
-          <div className="text-[12px] text-[var(--red)] mb-3">
-            Transmission failure. Network or corpus endpoint unavailable.
-          </div>
-          <button className="btn" onClick={() => setState('idle')}>
-            <span>RETRY</span>
-            <span className="opacity-50">↻</span>
-          </button>
-        </>
-      )}
+      <div className="flex items-center justify-between mt-2 text-[11px] text-[var(--dim)]">
+        <span>
+          {state === 'pending' && 'committing record to corpus…'}
+          {state === 'sent' && withGeo && 'coordinates fixed at ~110m envelope'}
+          {state === 'sent' && !withGeo && 'no coordinates attached'}
+          {state === 'error' && 'corpus unreachable'}
+          {(!state || state === 'idle') && 'queued for transmission'}
+        </span>
+        {state === 'sent' && (
+          <a href="/map.html" className="text-[var(--fg)] underline decoration-[var(--red)] underline-offset-2">VIEW HEATMAP →</a>
+        )}
+        {state === 'error' && (
+          <button onClick={onRetry} className="text-[var(--fg)] underline decoration-[var(--red)] underline-offset-2 bg-transparent border-0 p-0 cursor-pointer font-mono text-[11px]">RETRY ↻</button>
+        )}
+      </div>
     </div>
   );
 };
 
 // ---- Result screen -------------------------------------------------------
-const Result = ({ scan, onNew, onShare }) => {
+const Result = ({ scan, onNew, onShare, onRetryTelemetry }) => {
   const v = scan.verdict;
   const overall = scan.overall;
   const streaming = !!scan.streaming;
@@ -1381,8 +1342,9 @@ const Result = ({ scan, onNew, onShare }) => {
           </div>
         )}
 
-        {/* Telemetry — corpus submission */}
-        {!streaming && <TelemetryPanel scan={scan} />}
+        {/* Telemetry — passive corpus archive indicator (live scans only;
+            history records have telemetry stripped before persistence) */}
+        {scan.telemetry && <TelemetryStatus scan={scan} onRetry={onRetryTelemetry} />}
 
         {/* Metric table */}
         <div className="panel mb-3 relative">
@@ -1493,12 +1455,53 @@ const App = () => {
   const [scan, setScan] = useState(null);
   const [history, setHistory] = useState([]);
   const [err, setErr] = useState(null);
+  // geo: null = pending/unknown, { lat, lng } = granted, 'denied' = explicit denial.
+  // Captured on the BEGIN ANALYSIS / UPLOAD click (or auto-fetched if previously granted)
+  // and used for the auto-archive submit at the end of every scan.
+  const geoRef = useRef(null);
+  const geoRequestedRef = useRef(false);
 
   // Register service worker
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
+  }, []);
+
+  // If geolocation was granted in a prior session, fetch silently — no prompt
+  // appears for already-granted permission.
+  useEffect(() => {
+    if (!('permissions' in navigator)) return;
+    navigator.permissions.query({ name: 'geolocation' }).then((p) => {
+      if (p.state === 'granted') ensureGeo();
+      else if (p.state === 'denied') geoRef.current = 'denied';
+    }).catch(() => {});
+  }, []);
+
+  // Idempotent: kicks off a getCurrentPosition once. Must be called from a
+  // user-gesture handler the first time so the prompt actually appears on iOS.
+  // Stores result on geoRef; never throws; never blocks.
+  const ensureGeo = useCallback(() => {
+    if (geoRequestedRef.current) return;
+    geoRequestedRef.current = true;
+    if (!('geolocation' in navigator)) { geoRef.current = 'denied'; return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { geoRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
+      () => { geoRef.current = 'denied'; },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 5 * 60 * 1000 }
+    );
+  }, []);
+
+  // Wait briefly for an in-flight geolocation request to resolve, then return
+  // a (lat, lng) tuple or null/null. Used right before the auto-submit.
+  const awaitGeo = useCallback(async (waitMs = 4000) => {
+    const t0 = Date.now();
+    while (geoRef.current === null && Date.now() - t0 < waitMs) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const g = geoRef.current;
+    if (g && typeof g === 'object') return { lat: g.lat, lng: g.lng };
+    return { lat: null, lng: null };
   }, []);
 
   // Logo click → return home and reset transient scan state
@@ -1675,11 +1678,28 @@ const App = () => {
       }
       setProgress(100);
 
-      const finalRecord = { ...baseRecord, commentary: commentary || baseRecord.commentary, streaming: false, meta };
-      // Drop the annotated dossier from persisted history — large + regenerable.
-      const { annotated: _drop, ...historyRecord } = finalRecord;
+      const finalRecord = {
+        ...baseRecord,
+        commentary: commentary || baseRecord.commentary,
+        streaming: false,
+        meta,
+        telemetry: { state: 'pending' },
+      };
+      // Drop the annotated dossier and live telemetry state from persisted history.
+      const { annotated: _drop, telemetry: _t, ...historyRecord } = finalRecord;
       saveHistory([historyRecord, ...history].slice(0, 50));
       setScan(finalRecord);
+
+      // Auto-archive to the corpus. Wait briefly for an in-flight geolocation
+      // request, then submit with whatever we have. Failure is non-fatal.
+      pushStatus('committing record to corpus…');
+      const { lat, lng } = await awaitGeo(4000);
+      const ok = await submitScan({ scan: finalRecord, lat, lng });
+      pushStatus(ok ? `corpus archive: ${lat != null ? 'geo-tagged' : 'anonymous'}` : 'corpus archive: failed');
+      setScan((s) => s ? {
+        ...s,
+        telemetry: ok ? { state: 'sent', withGeo: lat != null } : { state: 'error' },
+      } : s);
     } catch (e) {
       console.error(e);
       pushStatus(`fault: ${e.message || 'UNKNOWN'}`);
@@ -1687,6 +1707,18 @@ const App = () => {
       setTimeout(() => setStage('confirm'), 1200);
     }
   };
+
+  // Manual retry from TelemetryStatus when the auto-submit fails.
+  const retryTelemetry = useCallback(async () => {
+    if (!scan) return;
+    setScan((s) => s ? { ...s, telemetry: { state: 'pending' } } : s);
+    const { lat, lng } = await awaitGeo(4000);
+    const ok = await submitScan({ scan, lat, lng });
+    setScan((s) => s ? {
+      ...s,
+      telemetry: ok ? { state: 'sent', withGeo: lat != null } : { state: 'error' },
+    } : s);
+  }, [scan, awaitGeo]);
 
   const handleShare = async () => {
     if (!scan) return;
@@ -1717,7 +1749,12 @@ const App = () => {
   }
 
   if (stage === 'intake') {
-    return <Intake onCamera={() => setStage('camera')} onPick={handlePick} history={history} onOpenHistory={() => setStage('history')} />;
+    return <Intake
+      onCamera={() => { ensureGeo(); setStage('camera'); }}
+      onPick={(file) => { ensureGeo(); handlePick(file); }}
+      history={history}
+      onOpenHistory={() => setStage('history')}
+    />;
   }
   if (stage === 'camera') {
     return <Camera onCapture={handlePick} onCancel={() => setStage('intake')} onUpload={() => {
@@ -1734,7 +1771,12 @@ const App = () => {
     return <Scanning image={image} metrics={metricsState} progress={progress} statusLines={statusLines} scanId={scanId} />;
   }
   if (stage === 'result' && scan) {
-    return <Result scan={scan} onNew={() => { setImage(null); setScan(null); setMetricsState(null); setStage('intake'); }} onShare={handleShare} />;
+    return <Result
+      scan={scan}
+      onNew={() => { setImage(null); setScan(null); setMetricsState(null); setStage('intake'); }}
+      onShare={handleShare}
+      onRetryTelemetry={retryTelemetry}
+    />;
   }
   if (stage === 'history') {
     return <History scans={history} onOpen={(s) => { setScan(s); setStage('result'); }} onBack={() => setStage('intake')} onClear={() => { saveHistory([]); }} />;

@@ -80,8 +80,12 @@ read view is coarsened beyond the 110m source precision.
    `numeric(6,3)` column also enforces this server-side.
 2. The image is never sent to Supabase. Only the verdict + score + coords.
 3. RLS prevents reading individual rows. Heatmap is via aggregated RPC only.
-4. Submission is opt-in. Two buttons in `TelemetryPanel`: "TRANSMIT WITH GEOLOCATION"
-   or "TRANSMIT ANONYMOUSLY" (lat/lng null). Default is untransmitted.
+4. **Submission is automatic, geolocation is opt-in.** Every scan auto-archives
+   to the corpus when analysis finishes. Geolocation is requested on the BEGIN
+   ANALYSIS / UPLOAD click (must be a user gesture for iOS to surface the
+   prompt). If the user denies or the prompt times out, the row is still
+   inserted with `lat`/`lng` null. The intake page discloses this behavior in
+   the procedure list.
 
 ## App architecture
 
