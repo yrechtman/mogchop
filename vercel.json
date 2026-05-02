@@ -5,6 +5,9 @@
       "maxDuration": 30
     }
   },
+  "rewrites": [
+    { "source": "/map", "destination": "/map.html" }
+  ],
   "headers": [
     {
       "source": "/sw.js",

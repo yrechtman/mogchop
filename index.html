@@ -224,6 +224,10 @@ const BUILD = '1.0.0-α';
 const SUB = 'CRANIAL.ANALYSIS.ENGINE';
 const STORAGE_KEY = 'mogchop.scans.v1';
 
+// Supabase corpus (anonymous insert via RLS; reads via aggregated RPC only).
+const SUPABASE_URL = 'https://kqesemrxxymodmydgapf.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_lJLA1HvzC5vGktLNW4cb2Q_1lLTKng7';
+
 // MediaPipe FaceLandmarker landmark indices (468-point mesh)
 // "left" / "right" below refer to the SUBJECT's anatomy.
 // In a non-mirrored selfie, the SUBJECT'S left = VIEWER's right.
@@ -755,6 +759,51 @@ function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
   return c.toDataURL('image/jpeg', 0.88);
 }
 
+// ---- Corpus telemetry (Supabase) -----------------------------------------
+// Insert one scan record. Coordinates are rounded to 3 decimals client-side
+// (~110m precision) for privacy, then again by the column type on insert.
+// Returns true on 2xx, false otherwise. Never throws.
+async function submitScan({ scan, lat, lng }) {
+  try {
+    const body = {
+      scan_id: scan.id,
+      verdict: scan.verdict.stamp,
+      tier: scan.verdict.tier,
+      overall: Number(scan.overall.toFixed(2)),
+      percentile: scan.percentile != null ? Number(scan.percentile.toFixed(2)) : null,
+      sigma_drift: scan.sigmaDrift != null ? Number(scan.sigmaDrift.toFixed(3)) : null,
+      lat: (lat != null && Number.isFinite(lat)) ? Number(lat.toFixed(3)) : null,
+      lng: (lng != null && Number.isFinite(lng)) ? Number(lng.toFixed(3)) : null,
+      user_agent: navigator.userAgent.slice(0, 200),
+    };
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/scans`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'content-type': 'application/json',
+        prefer: 'return=minimal',
+      },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Geolocation with timeout. Resolves null on denial / unavailable / timeout.
+function getCoarseLocation() {
+  return new Promise((resolve) => {
+    if (!('geolocation' in navigator)) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60_000 }
+    );
+  });
+}
+
 // ---- Live section parser (mirrors api/analyze.js parseSections) ----------
 function parseLiveSections(raw) {
   const out = { observations: '', profile_inference: '', strengths: [], weaknesses: [], final_remark: '' };
@@ -894,6 +943,11 @@ const Intake = ({ onCamera, onPick, history, onOpenHistory }) => {
             <span className="opacity-50">→</span>
           </button>
         )}
+
+        <a href="/map.html" className="btn btn-ghost mt-3">
+          <span>CORPUS HEATMAP</span>
+          <span className="opacity-50">⌖</span>
+        </a>
 
         <footer className="mt-10 pt-4 border-t border-[var(--line)] flex items-center justify-between">
           <span className="label">BUILD {BUILD}</span>
@@ -1149,6 +1203,85 @@ const Scanning = ({ image, metrics, progress, statusLines, scanId }) => {
   );
 };
 
+// ---- Telemetry panel (corpus submission) ---------------------------------
+const TelemetryPanel = ({ scan }) => {
+  const [state, setState] = useState('idle');
+  // idle | requesting | submitting | sent_geo | sent_anon | error
+  const verdictColor = scan.verdict.side === 'mog' ? 'text-[var(--green)]'
+    : scan.verdict.side === 'chop' ? 'text-[var(--red)]' : 'text-[var(--amber)]';
+
+  const transmit = async (withGeo) => {
+    let lat = null, lng = null;
+    if (withGeo) {
+      setState('requesting');
+      const pos = await getCoarseLocation();
+      if (pos) { lat = pos.lat; lng = pos.lng; }
+    }
+    setState('submitting');
+    const ok = await submitScan({ scan, lat, lng });
+    setState(ok ? (lat != null ? 'sent_geo' : 'sent_anon') : 'error');
+  };
+
+  return (
+    <div className="panel p-4 mb-3 relative">
+      <span className="corner tl"></span><span className="corner tr"></span>
+      <span className="corner bl"></span><span className="corner br"></span>
+      <div className="flex items-center justify-between mb-2">
+        <span className="label">// CORPUS SUBMISSION</span>
+        {state === 'idle' && <span className="label text-[var(--dim)]">UNTRANSMITTED</span>}
+        {state === 'requesting' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--amber)] pulse-dot"></span>ACQUIRING</span>}
+        {state === 'submitting' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)] pulse-dot"></span>UPLINKING</span>}
+        {state === 'sent_geo' && <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--green)]"></span>TRANSMITTED · GEO</span>}
+        {state === 'sent_anon' && <span className="badge ok"><span className="w-1.5 h-1.5 rounded-full bg-[var(--amber)]"></span>TRANSMITTED · NO GEO</span>}
+        {state === 'error' && <span className="badge live"><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]"></span>FAULT</span>}
+      </div>
+
+      {state === 'idle' && (
+        <>
+          <div className="text-[12px] leading-relaxed text-[var(--dim)] mb-3">
+            Specimen verdict (<span className={verdictColor}>{scan.verdict.stamp}</span> · {scan.overall.toFixed(1)}) may be filed to the global CFM-12 corpus. Geolocation rounded to ~110m before transmission. No image, no identity.
+          </div>
+          <button className="btn mb-2" onClick={() => transmit(true)}>
+            <span>▸ TRANSMIT WITH GEOLOCATION</span>
+            <span className="opacity-50">↗</span>
+          </button>
+          <button className="btn btn-ghost" onClick={() => transmit(false)}>
+            <span>TRANSMIT ANONYMOUSLY</span>
+            <span className="opacity-50">+</span>
+          </button>
+        </>
+      )}
+      {(state === 'requesting' || state === 'submitting') && (
+        <div className="text-[12px] text-[var(--dim)]">
+          {state === 'requesting' ? 'awaiting geolocation handshake…' : 'committing record to corpus…'}
+        </div>
+      )}
+      {(state === 'sent_geo' || state === 'sent_anon') && (
+        <>
+          <div className={`text-[12px] leading-relaxed ${verdictColor} mb-3`}>
+            Record archived. {state === 'sent_geo' ? 'Coordinates fixed at 110m envelope.' : 'No coordinates attached.'}
+          </div>
+          <a href="/map.html" className="btn">
+            <span>▸ VIEW CORPUS HEATMAP</span>
+            <span className="opacity-50">↗</span>
+          </a>
+        </>
+      )}
+      {state === 'error' && (
+        <>
+          <div className="text-[12px] text-[var(--red)] mb-3">
+            Transmission failure. Network or corpus endpoint unavailable.
+          </div>
+          <button className="btn" onClick={() => setState('idle')}>
+            <span>RETRY</span>
+            <span className="opacity-50">↻</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+};
+
 // ---- Result screen -------------------------------------------------------
 const Result = ({ scan, onNew, onShare }) => {
   const v = scan.verdict;
@@ -1248,6 +1381,9 @@ const Result = ({ scan, onNew, onShare }) => {
           </div>
         )}
 
+        {/* Telemetry — corpus submission */}
+        {!streaming && <TelemetryPanel scan={scan} />}
+
         {/* Metric table */}
         <div className="panel mb-3 relative">
           <span className="corner tl"></span><span className="corner tr"></span>
@@ -1345,11 +1481,6 @@ const History = ({ scans, onOpen, onBack, onClear }) => (
     </main>
   </div>
 );
-
-// ---- Debug hooks (harmless; stripped before prod releases) ---------------
-if (typeof window !== 'undefined') {
-  window.__CAE = { renderAnnotatedDossier, computeMetrics, getLandmarker, verdictFor, LM };
-}
 
 // ---- Main App ------------------------------------------------------------
 const App = () => {

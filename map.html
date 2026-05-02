@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MOG/CHOP · CORPUS HEATMAP</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #050505; --fg: #F5F5F5; --dim: #888; --dim-2: #444;
+      --line: #1f1f1f; --line-2: #2a2a2a;
+      --red: #FF2A2A; --green: #2ECF6B; --amber: #FFEC2A;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--bg); color: var(--fg); margin: 0; height: 100%;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 12px;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; }
+    header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      background: rgba(5,5,5,0.85); backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+      padding: 10px 14px;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 14px; flex-wrap: wrap;
+    }
+    .title {
+      font-family: "Space Grotesk", "Helvetica Neue", sans-serif;
+      font-weight: 700; font-size: 22px; letter-spacing: -0.01em;
+      text-decoration: none; color: var(--fg);
+      line-height: 1;
+    }
+    .title .slash { color: var(--red); }
+    .sub { color: var(--dim); margin-left: 10px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .stats { display: flex; gap: 14px; }
+    .stat { color: var(--dim); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+    .stat .val { color: var(--fg); font-weight: 700; font-size: 13px; margin-right: 4px; font-variant-numeric: tabular-nums; }
+    .stat.mog .val { color: var(--green); }
+    .stat.mid .val { color: var(--amber); }
+    .stat.chop .val { color: var(--red); }
+    .filter {
+      display: inline-flex; align-items: stretch; border: 1px solid var(--line); overflow: hidden;
+    }
+    .filter button {
+      background: transparent; color: var(--dim); border: 0; padding: 4px 9px;
+      font-family: inherit; font-size: 10px; letter-spacing: 0.1em; cursor: pointer;
+    }
+    .filter button + button { border-left: 1px solid var(--line); }
+    .filter button:hover { color: var(--fg); }
+    .filter button.active { background: var(--fg); color: #000; }
+    .filter button.active.mog { background: var(--green); color: #000; }
+    .filter button.active.mid { background: var(--amber); color: #000; }
+    .filter button.active.chop { background: var(--red); color: #fff; }
+    #map { position: absolute; inset: 0; }
+    .leaflet-container { background: #050505; outline: 0; }
+    /* CARTO dark tiles look great as-is; subtle tint to match the app palette. */
+    .leaflet-tile-pane { filter: contrast(1.05) brightness(0.92); }
+    .leaflet-control-attribution {
+      background: rgba(0,0,0,0.6) !important; color: var(--dim) !important; font-size: 9px !important;
+      border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+    }
+    .leaflet-control-attribution a { color: var(--dim) !important; }
+    .legend {
+      position: fixed; bottom: 12px; left: 12px; z-index: 1000;
+      background: rgba(5,5,5,0.82); padding: 10px 12px; border: 1px solid var(--line);
+      font-size: 10px; letter-spacing: 0.05em;
+      max-width: 240px;
+    }
+    .legend .head { font-weight: 700; font-family: "Space Grotesk", sans-serif; letter-spacing: 0.05em; margin-bottom: 6px; font-size: 11px; }
+    .legend .row { display: flex; align-items: center; gap: 8px; margin-top: 4px; color: var(--dim); }
+    .legend .sw { width: 28px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .legend .gradient { background: linear-gradient(90deg, #2ECF6B 0%, #FFEC2A 50%, #FF2A2A 100%); }
+    .pane-overlay {
+      position: fixed; inset: 0; pointer-events: none; z-index: 600;
+      background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.35) 100%);
+    }
+    .empty {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(5,5,5,0.92); border: 1px solid var(--line); padding: 24px 28px;
+      text-align: center; max-width: 380px; z-index: 800;
+    }
+    .empty .head { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 18px; margin-bottom: 8px; }
+    .empty .body { color: var(--dim); font-size: 12px; line-height: 1.55; }
+    .empty a { color: var(--fg); text-decoration: underline; text-decoration-color: var(--red); }
+    .corner { position: absolute; width: 12px; height: 12px; border-color: var(--red); border-style: solid; border-width: 0; }
+    .corner.tl { top: 0; left: 0; border-top-width: 1.5px; border-left-width: 1.5px; }
+    .corner.tr { top: 0; right: 0; border-top-width: 1.5px; border-right-width: 1.5px; }
+    .corner.bl { bottom: 0; left: 0; border-bottom-width: 1.5px; border-left-width: 1.5px; }
+    .corner.br { bottom: 0; right: 0; border-bottom-width: 1.5px; border-right-width: 1.5px; }
+    @media (max-width: 600px) {
+      header { padding: 8px 10px; gap: 8px; }
+      .title { font-size: 18px; }
+      .sub { display: none; }
+      .stats { gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <a class="title" href="/">MOG<span class="slash">/</span>CHOP</a>
+      <span class="sub">// CORPUS HEATMAP</span>
+    </div>
+    <div class="right">
+      <div class="stats" id="stats"></div>
+      <div class="filter" id="filter">
+        <button data-v="all" class="active">ALL</button>
+        <button data-v="mog">MOG</button>
+        <button data-v="mid">MID</button>
+        <button data-v="chop">CHOP</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="map"></div>
+  <div class="pane-overlay"></div>
+
+  <div class="legend">
+    <span class="corner tl"></span><span class="corner tr"></span>
+    <span class="corner bl"></span><span class="corner br"></span>
+    <div class="head">DENSITY · CFM-12</div>
+    <div class="row"><span class="sw gradient"></span> low → high</div>
+    <div class="row" style="margin-top:8px;color:var(--dim-2);">~1km bucket · ~110m source<br/>NO IMAGE · NO IDENTITY</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script>
+    const SUPABASE_URL = 'https://kqesemrxxymodmydgapf.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_lJLA1HvzC5vGktLNW4cb2Q_1lLTKng7';
+
+    const map = L.map('map', {
+      worldCopyJump: true,
+      preferCanvas: true,
+      zoomControl: false,
+    }).setView([30, 0], 2);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '© OSM · © CARTO',
+    }).addTo(map);
+
+    const HEAT_OPTS = {
+      radius: 26, blur: 22, maxZoom: 12, minOpacity: 0.35,
+      gradient: { 0.2: '#2ECF6B', 0.55: '#FFEC2A', 0.85: '#FF2A2A' },
+    };
+
+    let layers = { all: null, mog: null, mid: null, chop: null };
+    let activeFilter = 'all';
+    let totalRecords = 0;
+
+    async function rpc(fn, body = {}) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`${fn} ${res.status}`);
+      return res.json();
+    }
+
+    function buildLayer(points, key) {
+      const data = points
+        .map(p => {
+          const w = key === 'all' ? Number(p.total)
+            : key === 'mog' ? Number(p.mog_count)
+            : key === 'mid' ? Number(p.mid_count)
+            : Number(p.chop_count);
+          return w > 0 ? [Number(p.lat), Number(p.lng), Math.log10(w + 1)] : null;
+        })
+        .filter(Boolean);
+      return L.heatLayer(data, HEAT_OPTS);
+    }
+
+    function setFilter(name) {
+      activeFilter = name;
+      Object.entries(layers).forEach(([k, l]) => {
+        if (!l) return;
+        if (k === name) l.addTo(map); else map.removeLayer(l);
+      });
+      document.querySelectorAll('#filter button').forEach(b => {
+        b.classList.toggle('active', b.dataset.v === name);
+        b.classList.toggle('mog', b.dataset.v === 'mog' && name === 'mog');
+        b.classList.toggle('mid', b.dataset.v === 'mid' && name === 'mid');
+        b.classList.toggle('chop', b.dataset.v === 'chop' && name === 'chop');
+      });
+    }
+
+    document.querySelectorAll('#filter button').forEach(b => {
+      b.addEventListener('click', () => setFilter(b.dataset.v));
+    });
+
+    function showEmpty() {
+      const el = document.createElement('div');
+      el.className = 'empty';
+      el.innerHTML = `
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+        <div class="head">CORPUS · NULL</div>
+        <div class="body">No specimens transmitted yet. <a href="/">Submit a scan</a> with geolocation enabled and the cell will populate.</div>
+      `;
+      document.body.appendChild(el);
+    }
+
+    async function loadHeatmap() {
+      try {
+        const points = await rpc('heatmap', { bucket_prec: 1 });
+        if (!Array.isArray(points) || points.length === 0) {
+          if (totalRecords === 0) showEmpty();
+          return;
+        }
+        layers.all = buildLayer(points, 'all');
+        layers.mog = buildLayer(points, 'mog');
+        layers.mid = buildLayer(points, 'mid');
+        layers.chop = buildLayer(points, 'chop');
+        layers.all.addTo(map);
+      } catch (e) {
+        console.error('heatmap fetch failed', e);
+      }
+    }
+
+    async function loadSummary() {
+      try {
+        const rows = await rpc('summary');
+        const r = Array.isArray(rows) ? rows[0] : rows;
+        if (!r) return;
+        totalRecords = Number(r.total) || 0;
+        const stats = document.getElementById('stats');
+        stats.innerHTML = `
+          <span class="stat"><span class="val">${r.total}</span>N</span>
+          <span class="stat mog"><span class="val">${r.mog_count}</span>MOG</span>
+          <span class="stat mid"><span class="val">${r.mid_count}</span>MID</span>
+          <span class="stat chop"><span class="val">${r.chop_count}</span>CHOP</span>
+        `;
+      } catch (e) {
+        console.error('summary fetch failed', e);
+      }
+    }
+
+    (async () => {
+      await loadSummary();
+      await loadHeatmap();
+      if (totalRecords === 0) showEmpty();
+    })();
+  </script>
+</body>
+</html>
