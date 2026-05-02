@@ -1,0 +1,10 @@
+{
+  "name": "mogchop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MOG/CHOP — Cranial Analysis Engine",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0"
+  }
+}

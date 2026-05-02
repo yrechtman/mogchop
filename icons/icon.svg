@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#000"/>
+  <g fill="none" stroke="#ff2a2a" stroke-width="2">
+    <circle cx="256" cy="256" r="180"/>
+    <circle cx="256" cy="256" r="120"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="256" y1="256" x2="436" y2="256" stroke-dasharray="4 6"/>
+  </g>
+  <g font-family="ui-monospace, Menlo, Monaco, monospace" fill="#fafafa">
+    <text x="256" y="248" text-anchor="middle" font-size="84" font-weight="700" letter-spacing="-2">MOG</text>
+    <text x="256" y="296" text-anchor="middle" font-size="32" font-weight="500" fill="#ff2a2a">/</text>
+    <text x="256" y="346" text-anchor="middle" font-size="84" font-weight="700" letter-spacing="-2">CHOP</text>
+  </g>
+  <g font-family="ui-monospace, Menlo, Monaco, monospace" fill="#888" font-size="14">
+    <text x="40" y="60">CAE//001</text>
+    <text x="472" y="60" text-anchor="end">v1.0</text>
+    <text x="40" y="478">CRANIAL.ANALYSIS</text>
+    <text x="472" y="478" text-anchor="end">ENGINE</text>
+  </g>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "name": "MOG/CHOP — Cranial Analysis Engine",
+  "short_name": "MOG/CHOP",
+  "description": "Computational craniofacial morphometric analysis.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["medical", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
