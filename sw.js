@@ -1,4 +1,4 @@
-const CACHE = 'mogchop-v3';
+const CACHE = 'mogchop-v4';
 const SHELL = ['/manifest.webmanifest', '/icons/icon.svg'];
 
 self.addEventListener('install', (e) => {
@@ -6,10 +6,17 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+    // Force-reload any tabs that were loaded under the previous SW so they
+    // pick up fresh HTML through the new network-first strategy.
+    const clients = await self.clients.matchAll({ type: 'window' });
+    for (const c of clients) {
+      try { await c.navigate(c.url); } catch {}
+    }
+  })());
 });
 
 self.addEventListener('message', (e) => {
