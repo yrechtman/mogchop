@@ -311,13 +311,16 @@ function computeMetrics(lm, imgW, imgH) {
   const symRel = symErrSum / SYM_PAIRS.length / faceW; // smaller = better
   const symmetryScore = clamp(100 - 1800 * symRel, 5, 99);
 
-  // Canthal tilt: angle from inner→outer canthus, both eyes, then average.
-  // In image coordinates Y grows downward. "Positive" canthal tilt (cosmetic) =
-  // outer canthus higher than inner = atan2(outer.y - inner.y, ...) is NEGATIVE in
-  // image coords. We invert sign for display.
-  const tiltL = -ang(get(LM.L_eye_inner), get(LM.L_eye_outer));
-  const tiltR =  ang(get(LM.R_eye_inner), get(LM.R_eye_outer));
-  const canthalTilt = (tiltL + tiltR) / 2; // degrees, + = positive tilt (hunter eyes)
+  // Canthal tilt: angle from inner→outer canthus per eye, then averaged.
+  // Image coords: Y grows downward; subject's left/right eye swap sign of dx.
+  // We want POSITIVE = outer corner ABOVE inner corner ("hunter eyes"),
+  // regardless of which side. So measure the rise (inner.y - outer.y) over
+  // the absolute horizontal run.
+  const tiltOf = (inner, outer) =>
+    Math.atan2(inner.y - outer.y, Math.abs(outer.x - inner.x)) * 180 / Math.PI;
+  const tiltL = tiltOf(get(LM.L_eye_inner), get(LM.L_eye_outer));
+  const tiltR = tiltOf(get(LM.R_eye_inner), get(LM.R_eye_outer));
+  const canthalTilt = (tiltL + tiltR) / 2; // degrees, + = positive tilt
 
   // Bigonial / bizygomatic ratio (jaw width / cheekbone width)
   const bigonial = dist(get(LM.L_gonion), get(LM.R_gonion));
@@ -472,6 +475,255 @@ function downsize(img, maxDim = 1024) {
 
 function canvasToB64(canvas, type = 'image/jpeg', q = 0.85) {
   return canvas.toDataURL(type, q);
+}
+
+// ---- Dossier renderer ----------------------------------------------------
+// Burns the diagnostic overlay onto the photo: full mesh, midline, fifths
+// grid, thirds rule, canthal tilt arcs, mandibular angle arcs, calipers
+// (bizygomatic, bigonial, mouth, nose, inter-canthal), philtral bracket,
+// labeled glyph crosshairs, registration marks, top/bottom telemetry burn-in,
+// diagonal watermark, verdict stamp.
+function renderAnnotatedDossier({ imgEl, lm, M, scanId, verdict, ts }) {
+  const target = 1100;
+  const ratio = Math.min(1, target / Math.max(imgEl.naturalWidth, imgEl.naturalHeight));
+  const W = Math.round(imgEl.naturalWidth * ratio);
+  const H = Math.round(imgEl.naturalHeight * ratio);
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+
+  // Base photo, slightly darkened for line legibility.
+  ctx.drawImage(imgEl, 0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(0, 0, W, H);
+
+  const px = (i) => ({ x: lm[i].x * W, y: lm[i].y * H });
+  const fh = px(LM.forehead), ch = px(LM.chin);
+  const faceH = Math.hypot(ch.x - fh.x, ch.y - fh.y) || 1;
+  const lZyg = px(LM.L_zygo), rZyg = px(LM.R_zygo);
+  const lGon = px(LM.L_gonion), rGon = px(LM.R_gonion);
+  const lJaw = px(LM.L_jaw_lat), rJaw = px(LM.R_jaw_lat);
+
+  // ---- helpers
+  const set = (color, width = 1, dash = null) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.setLineDash(dash || []);
+  };
+  const line = (a, b) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
+  const ticked = (a, b, t = 8) => {
+    line(a, b);
+    const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L * t, ny = dx / L * t;
+    ctx.beginPath();
+    ctx.moveTo(a.x - nx, a.y - ny); ctx.lineTo(a.x + nx, a.y + ny);
+    ctx.moveTo(b.x - nx, b.y - ny); ctx.lineTo(b.x + nx, b.y + ny);
+    ctx.stroke();
+  };
+  const circle = (p, r) => { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.stroke(); };
+  const dot = (p, r) => { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill(); };
+  const chip = (text, anchor, color = '#F5F5F5', bg = 'rgba(0,0,0,0.82)', size = 11) => {
+    ctx.font = `${size}px ui-monospace, "JetBrains Mono", monospace`;
+    const w = ctx.measureText(text).width + 8;
+    const h = size + 6;
+    ctx.fillStyle = bg;
+    ctx.fillRect(anchor.x, anchor.y - h, w, h);
+    ctx.strokeStyle = color; ctx.lineWidth = 0.6; ctx.setLineDash([]);
+    ctx.strokeRect(anchor.x + 0.3, anchor.y - h + 0.3, w - 0.6, h - 0.6);
+    ctx.fillStyle = color;
+    ctx.fillText(text, anchor.x + 4, anchor.y - 5);
+  };
+
+  const Mby = Object.fromEntries(M.metrics.map((m) => [m.id, m]));
+
+  // 1. Faint full 468-point mesh
+  ctx.fillStyle = 'rgba(255,42,42,0.5)';
+  for (const p of lm) ctx.fillRect(p.x * W - 0.5, p.y * H - 0.5, 1, 1);
+
+  // 2. Vertical fifths grid
+  set('rgba(245,245,245,0.32)', 0.6, [2, 5]);
+  for (let i = 1; i < 5; i++) {
+    const x = lJaw.x + (rJaw.x - lJaw.x) * i / 5;
+    line({ x, y: 0 }, { x, y: H });
+  }
+  ctx.fillStyle = 'rgba(245,245,245,0.55)';
+  ctx.font = '9px ui-monospace, monospace';
+  ctx.fillText(`FIFTHS Σ = ${Mby.fifths.value.toFixed(3)}`, 8, H - 50);
+
+  // 3. Horizontal thirds rule
+  const browMid = mid(px(LM.L_brow_inner), px(LM.R_brow_inner));
+  const subn = px(LM.subnasale);
+  set('rgba(245,245,245,0.55)', 0.7, [4, 4]);
+  for (const y of [fh.y, browMid.y, subn.y, ch.y]) line({ x: 0, y }, { x: W, y });
+  ctx.fillStyle = 'rgba(245,245,245,0.85)';
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillText(`T₁ = ${(dist(fh, browMid)/faceH).toFixed(3)}`, 8, fh.y + 14);
+  ctx.fillText(`T₂ = ${(dist(browMid, subn)/faceH).toFixed(3)}`, 8, browMid.y + 14);
+  ctx.fillText(`T₃ = ${(dist(subn, ch)/faceH).toFixed(3)}`, 8, subn.y + 14);
+
+  // 4. Subject midline (red, extended)
+  set('rgba(255,42,42,0.92)', 1.4);
+  const dxN = (ch.x - fh.x) / faceH, dyN = (ch.y - fh.y) / faceH, ext = 28;
+  line({ x: fh.x - dxN*ext, y: fh.y - dyN*ext }, { x: ch.x + dxN*ext, y: ch.y + dyN*ext });
+
+  // 5. Bizygomatic + bigonial calipers (values live in the bottom telemetry strip)
+  set('#F5F5F5', 1);
+  ticked(lZyg, rZyg, 10);
+  ticked(lGon, rGon, 10);
+
+  // 6. Inter-canthal width
+  const lInner = px(LM.L_eye_inner), rInner = px(LM.R_eye_inner);
+  set('rgba(255,42,42,0.85)', 1);
+  ticked(lInner, rInner, 6);
+
+  // 7. Canthal tilt — line + horizontal baseline + arc + signed value
+  const tiltAt = (innerIdx, outerIdx) => {
+    const inn = px(innerIdx), out = px(outerIdx);
+    const dxSign = (out.x - inn.x) >= 0 ? 1 : -1;
+    set('#FFEC2A', 1.2); line(inn, out);
+    set('rgba(255,236,42,0.45)', 0.8, [3, 3]); line(inn, { x: out.x, y: inn.y });
+    set('#FFEC2A', 0.9);
+    const r = 22;
+    const a0 = dxSign > 0 ? 0 : Math.PI;
+    const a1 = Math.atan2(out.y - inn.y, out.x - inn.x);
+    ctx.beginPath();
+    ctx.arc(inn.x, inn.y, r, Math.min(a0, a1), Math.max(a0, a1));
+    ctx.stroke();
+    const signed = Math.atan2(inn.y - out.y, Math.abs(out.x - inn.x)) * 180 / Math.PI;
+    const txt = `${signed >= 0 ? '+' : ''}${signed.toFixed(1)}°`;
+    ctx.font = `11px ui-monospace, "JetBrains Mono", monospace`;
+    const w = ctx.measureText(txt).width + 8;
+    const labelX = dxSign > 0 ? inn.x + r + 4 : inn.x - r - 4 - w;
+    chip(txt, { x: labelX, y: inn.y + 4 }, '#FFEC2A');
+  };
+  tiltAt(LM.L_eye_inner, LM.L_eye_outer);
+  tiltAt(LM.R_eye_inner, LM.R_eye_outer);
+
+  // 8. Eye boxes (frontal aperture zones)
+  set('rgba(46,207,107,0.7)', 0.8);
+  ctx.font = '9px ui-monospace, monospace';
+  for (const [innerI, outerI, topI, botI, side] of [
+    [LM.L_eye_inner, LM.L_eye_outer, LM.L_eye_top, LM.L_eye_bot, 'L'],
+    [LM.R_eye_inner, LM.R_eye_outer, LM.R_eye_top, LM.R_eye_bot, 'R'],
+  ]) {
+    const inn = px(innerI), out = px(outerI), top = px(topI), bot = px(botI);
+    const xMin = Math.min(inn.x, out.x) - 4, xMax = Math.max(inn.x, out.x) + 4;
+    const yMin = top.y - 4, yMax = bot.y + 4;
+    ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
+    ctx.fillStyle = 'rgba(46,207,107,0.95)';
+    ctx.fillText(`AP·${side}`, xMin + 2, yMin - 3);
+  }
+
+  // 9. Mandibular angle arcs
+  const mandAt = (gonI, jawI) => {
+    const gon = px(gonI), jaw = px(jawI);
+    set('#FF2A2A', 1.2); line(ch, gon); line(gon, jaw);
+    set('rgba(255,42,42,0.55)', 0.8);
+    const r = 26;
+    const a1 = Math.atan2(ch.y - gon.y, ch.x - gon.x);
+    const a2 = Math.atan2(jaw.y - gon.y, jaw.x - gon.x);
+    ctx.beginPath();
+    ctx.arc(gon.x, gon.y, r, Math.min(a1, a2), Math.max(a1, a2));
+    ctx.stroke();
+    const v1 = { x: ch.x - gon.x, y: ch.y - gon.y };
+    const v2 = { x: jaw.x - gon.x, y: jaw.y - gon.y };
+    const cos = (v1.x*v2.x + v1.y*v2.y) / ((Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y)) || 1);
+    const angDeg = Math.acos(clamp(cos, -1, 1)) * 180 / Math.PI;
+    chip(`${angDeg.toFixed(0)}°`, { x: gon.x + r + 4, y: gon.y + 6 }, '#FF8888');
+  };
+  mandAt(LM.L_gonion, LM.L_jaw_lat);
+  mandAt(LM.R_gonion, LM.R_jaw_lat);
+
+  // 10. Mouth, nose alar, philtrum, lip stack
+  const lAl = px(LM.L_alae), rAl = px(LM.R_alae);
+  const lMo = px(LM.L_mouth), rMo = px(LM.R_mouth);
+  const ulT = px(LM.upper_lip_top), llB = px(LM.lower_lip_bot);
+  const ulO = px(LM.upper_lip_outer), llO = px(LM.lower_lip_outer);
+
+  set('rgba(245,245,245,0.85)', 1);
+  ticked(lAl, rAl, 6);
+  ticked(lMo, rMo, 6);
+
+  set('#FFEC2A', 1);
+  line(subn, ulT);
+
+  set('rgba(255,42,42,0.85)', 0.8);
+  line(ulO, ulT);
+  line(llB, llO);
+
+  // 11. Brow arch
+  set('#2ECF6B', 1);
+  line(px(LM.L_brow_inner), px(LM.L_brow_outer));
+  line(px(LM.R_brow_inner), px(LM.R_brow_outer));
+
+  // 12. Naso-facial axis
+  set('rgba(255,236,42,0.85)', 1, [4, 3]);
+  line(px(LM.nose_bridge), subn);
+
+  // 13. Glyph-labeled anatomical landmarks
+  set('rgba(245,245,245,0.95)', 0.9);
+  ctx.fillStyle = 'rgba(245,245,245,0.95)';
+  ctx.font = '10px ui-monospace, monospace';
+  const KEYPTS = [
+    ['α', LM.forehead], ['β', LM.chin], ['γ', LM.nose_tip], ['δ', LM.subnasale],
+    ['ε₁', LM.L_eye_outer], ['ε₂', LM.R_eye_outer],
+    ['ζ₁', LM.L_zygo], ['ζ₂', LM.R_zygo],
+    ['η₁', LM.L_gonion], ['η₂', LM.R_gonion],
+  ];
+  for (const [g, idx] of KEYPTS) {
+    const p = px(idx);
+    circle(p, 4); dot(p, 1.2);
+    ctx.fillText(g, p.x + 6, p.y - 6);
+  }
+
+  // 14. Corner registration marks
+  set('rgba(255,42,42,0.85)', 1.4);
+  const cs = 18;
+  for (const [cx, cy] of [[10, 10], [W-10, 10], [10, H-10], [W-10, H-10]]) {
+    const dx = cx === 10 ? 1 : -1, dy = cy === 10 ? 1 : -1;
+    line({ x: cx, y: cy }, { x: cx + dx*cs, y: cy });
+    line({ x: cx, y: cy }, { x: cx, y: cy + dy*cs });
+  }
+
+  // 15. Top telemetry bar
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, 24);
+  ctx.fillStyle = '#F5F5F5';
+  ctx.font = '11px ui-monospace, monospace';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`CAE/CFM-12  ${scanId}`, 8, 12);
+  const dt = new Date(ts).toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+  const right = `468PT · GPU · float16 · ${dt}`;
+  ctx.fillText(right, W - 8 - ctx.measureText(right).width, 12);
+
+  // 16. Bottom telemetry strip
+  ctx.fillStyle = 'rgba(0,0,0,0.78)';
+  ctx.fillRect(0, H - 42, W, 42);
+  ctx.fillStyle = '#F5F5F5';
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textBaseline = 'top';
+  const r1 = M.metrics.slice(0, 6).map((m) => `${m.id.toUpperCase()}=${m.value.toFixed(2)}`).join('  ');
+  const r2 = M.metrics.slice(6).map((m) => `${m.id.toUpperCase()}=${m.value.toFixed(2)}`).join('  ');
+  ctx.fillText(r1, 8, H - 36);
+  ctx.fillText(r2, 8, H - 20);
+
+  ctx.font = 'bold 14px "Space Grotesk", "Helvetica Neue", sans-serif';
+  ctx.fillStyle = verdict.side === 'mog' ? '#2ECF6B' : verdict.side === 'chop' ? '#FF2A2A' : '#FFEC2A';
+  const vText = `${verdict.stamp} · Σ=${M.overall.toFixed(1)}`;
+  ctx.fillText(vText, W - 8 - ctx.measureText(vText).width, H - 30);
+  ctx.textBaseline = 'alphabetic';
+
+  // 17. Diagonal watermark
+  ctx.save();
+  ctx.translate(W * 0.5, H * 0.5);
+  ctx.rotate(-Math.PI / 9);
+  ctx.font = 'bold 40px "Space Grotesk", sans-serif';
+  ctx.fillStyle = 'rgba(255,42,42,0.07)';
+  ctx.textAlign = 'center';
+  ctx.fillText('CAE / CFM-12 / DO NOT REPRODUCE', 0, 0);
+  ctx.restore();
+  ctx.textAlign = 'start';
+
+  return c.toDataURL('image/jpeg', 0.88);
 }
 
 // ---- Live section parser (mirrors api/analyze.js parseSections) ----------
@@ -898,15 +1150,19 @@ const Result = ({ scan, onNew, onShare }) => {
           </div>
         </div>
 
-        {/* Specimen */}
+        {/* Annotated dossier — the actual deliverable */}
         <div className="panel p-3 mb-3 relative">
           <span className="corner tl"></span><span className="corner tr"></span>
           <span className="corner bl"></span><span className="corner br"></span>
           <div className="flex items-center justify-between mb-2">
-            <span className="label">// SPECIMEN</span>
-            <span className="label num">{scan.id} · {new Date(scan.ts).toISOString().slice(0,16).replace('T',' ')}Z</span>
+            <span className="label">// SPECIMEN · CFM-12 OVERLAY</span>
+            <span className="label num">{scan.metrics.length} INDICES · 468pt</span>
           </div>
-          <img src={scan.thumbnail} alt="" className="w-full block" />
+          <img src={scan.annotated || scan.thumbnail} alt="" className="w-full block" />
+          <div className="flex items-center justify-between mt-2 text-[10px] text-[var(--dim)] num">
+            <span>α forehead · β chin · γ nose · δ subnasale · ε canthi · ζ zygomatic · η gonion</span>
+            <span>{scan.id}</span>
+          </div>
         </div>
 
         {/* Vision commentary */}
@@ -1154,18 +1410,22 @@ const App = () => {
       const v = verdictFor(M.overall);
       const sigmaDrift = Math.sqrt(M.metrics.reduce((s, m) => s + m.z*m.z, 0) / M.metrics.length);
       const percentile = clamp(100 - (M.overall < 50 ? 90 : 100) * (1 - Math.pow(M.overall/100, 1.4)) + (Math.random()-0.5)*4, 1, 99);
+      const ts = Date.now();
+      const annotated = renderAnnotatedDossier({ imgEl: image.el, lm: landmarks, M, scanId, verdict: v, ts });
       const thumbCanvas = downsize(image.el, 480);
       const thumb = canvasToB64(thumbCanvas, 'image/jpeg', 0.7);
+      pushStatus('dossier rasterized: 17 overlay layers');
 
       const baseRecord = {
         id: scanId,
-        ts: Date.now(),
+        ts,
         overall: M.overall,
         sigmaDrift,
         percentile,
         verdict: v,
         metrics: M.metrics.map(({ id, label, value, unit, mu, sigma, z, score, isScore }) => ({ id, label, value, unit, mu, sigma, z, score, isScore })),
         thumbnail: thumb,
+        annotated,
         commentary: { observations: '', profile_inference: '', strengths: [], weaknesses: [], final_remark: '' },
         streaming: true,
       };
@@ -1228,7 +1488,9 @@ const App = () => {
       setProgress(100);
 
       const finalRecord = { ...baseRecord, commentary: commentary || baseRecord.commentary, streaming: false, meta };
-      saveHistory([finalRecord, ...history].slice(0, 50));
+      // Drop the annotated dossier from persisted history — large + regenerable.
+      const { annotated: _drop, ...historyRecord } = finalRecord;
+      saveHistory([historyRecord, ...history].slice(0, 50));
       setScan(finalRecord);
     } catch (e) {
       console.error(e);
