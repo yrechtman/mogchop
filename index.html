@@ -430,14 +430,15 @@ function computeMetrics(lm, imgW, imgH) {
 
 // ---- Verdict tiers -------------------------------------------------------
 // MID is the wide common band by design: most specimens should land here.
-// MOG is for genuinely-on-axis morphometrics; CHOP for genuinely off-axis.
-// Range layout (v1.9):  PERMA <24 · HARD <36 · MARGINAL CHOP <50
-//                       MORPHOLOGICAL MID  50–69  ← the target zone
-//                       MARGINAL MOGGER ≥70 · CERTIFIED ≥78 · MYTHICAL ≥88
+// v1.11: pushed MID's upper bound up so even moderately-above-average
+// readings are still MID. MOG is now reserved for clearly-elite morphometrics.
+// Range layout: PERMA <24 · HARD <36 · MARGINAL CHOP <50
+//               MORPHOLOGICAL MID  50–75  ← target zone (26-pt band)
+//               MARGINAL MOGGER ≥76 · CERTIFIED ≥84 · MYTHICAL ≥92
 function verdictFor(overall) {
-  if (overall >= 88) return { stamp: 'MOG', tier: 'MYTHICAL MOGGER',     side: 'mog',  blurb: 'phenotype borderline-anomalous' };
-  if (overall >= 78) return { stamp: 'MOG', tier: 'CERTIFIED MOGGER',    side: 'mog',  blurb: 'morphometrics within elite envelope' };
-  if (overall >= 70) return { stamp: 'MOG', tier: 'MARGINAL MOGGER',     side: 'mog',  blurb: 'aesthetic vector trending positive' };
+  if (overall >= 92) return { stamp: 'MOG', tier: 'MYTHICAL MOGGER',     side: 'mog',  blurb: 'phenotype borderline-anomalous' };
+  if (overall >= 84) return { stamp: 'MOG', tier: 'CERTIFIED MOGGER',    side: 'mog',  blurb: 'morphometrics within elite envelope' };
+  if (overall >= 76) return { stamp: 'MOG', tier: 'MARGINAL MOGGER',     side: 'mog',  blurb: 'aesthetic vector trending positive' };
   if (overall >= 50) return { stamp: 'MID', tier: 'MORPHOLOGICAL MID',   side: 'mid',  blurb: 'no decisive gradient detected' };
   if (overall >= 36) return { stamp: 'CHOP',tier: 'MARGINAL CHOP',       side: 'chop', blurb: 'sub-canonical proportional drift' };
   if (overall >= 24) return { stamp: 'CHOP',tier: 'HARD CHOP',           side: 'chop', blurb: 'multiple deviations from norm exceed σ' };
@@ -1217,6 +1218,79 @@ const Scanning = ({ image, metrics, progress, statusLines, scanId }) => {
   );
 };
 
+// ---- Faculty parsing + categorization (phrenology layer) -----------------
+// Faculty lines arrive as "FACULTY NAME: SS — clinical justification."
+// We parse score, derive a categorical label (PRONOUNCED / DEVELOPED / NOMINAL
+// / DEPRESSED / VESTIGIAL) and a verdict-aligned color so the panel can
+// surface big categorical headlines above the per-line text.
+function parseFaculty(line) {
+  if (!line) return null;
+  const m = /^([A-Z][A-Z\-\/ ]+?)\s*[:：]\s*(\d{1,3})\s*[—–\-]+\s*(.*)$/.exec(line);
+  if (!m) return null;
+  const name = m[1].trim();
+  const score = Math.max(0, Math.min(100, parseInt(m[2], 10) || 0));
+  const note = m[3].trim();
+  let category, color;
+  if (score >= 85)      { category = 'PRONOUNCED'; color = '#2ECF6B'; }
+  else if (score >= 70) { category = 'DEVELOPED';  color = '#9DD53A'; }
+  else if (score >= 50) { category = 'NOMINAL';    color = '#FFEC2A'; }
+  else if (score >= 30) { category = 'DEPRESSED';  color = '#FF8C2A'; }
+  else                  { category = 'VESTIGIAL';  color = '#FF2A2A'; }
+  return { name, score, note, category, color };
+}
+
+const FacultyPanel = ({ faculties }) => {
+  const parsed = (faculties || []).map(parseFaculty).filter(Boolean);
+  if (!parsed.length) return null;
+  return (
+    <div className="panel p-4 mb-3 relative">
+      <span className="corner tl"></span><span className="corner tr"></span>
+      <span className="corner bl"></span><span className="corner br"></span>
+      <div className="flex items-center justify-between mb-3">
+        <span className="label text-[var(--amber)]">⌬ PHRENOLOGICAL ASSESSMENT</span>
+        <span className="label num">{parsed.length} FACULTIES · CFP-14</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        {parsed.map((f, i) => (
+          <div
+            key={i}
+            className="border p-2.5 relative"
+            style={{ borderColor: f.color + '66', backgroundColor: f.color + '0d' }}
+          >
+            <div className="text-[9px] text-[var(--dim)] tracking-[0.12em] uppercase mb-1">
+              {f.name}
+            </div>
+            <div
+              className="font-display text-[15px] leading-none tracking-wide"
+              style={{ color: f.color }}
+            >
+              {f.category}
+            </div>
+            <div className="text-[10px] num text-[var(--dim)] mt-1.5 flex items-center gap-2">
+              <span style={{ color: f.color }}>●</span>
+              <span>{f.score}<span className="opacity-50">/100</span></span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-dashed border-[var(--line-2)] pt-3">
+        <div className="label mb-2">// JUSTIFICATIONS</div>
+        <ul className="text-[11px] space-y-1 leading-relaxed text-[var(--dim)]">
+          {parsed.map((f, i) => (
+            <li key={i}>
+              <span className="num" style={{ color: f.color }}>{String(i + 1).padStart(2, '0')}</span>
+              <span className="mx-2 opacity-50">→</span>
+              <span className="text-[var(--fg)] tracking-wider">{f.name}</span>
+              <span className="text-[var(--dim)] mx-2">·</span>
+              <span>{f.note}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+};
+
 // ---- Telemetry status (passive archive indicator) ------------------------
 // Submission happens automatically in handleAnalyze. This component only
 // reflects the current state of the in-flight / completed transmission.
@@ -1306,6 +1380,9 @@ const Result = ({ scan, onNew, onShare, onRetryTelemetry }) => {
           </div>
         </div>
 
+        {/* Phrenological assessment — prominent dedicated panel */}
+        <FacultyPanel faculties={scan.commentary?.faculties} />
+
         {/* Vision commentary */}
         {(scan.commentary || streaming) && (
           <div className="panel p-4 mb-3 relative">
@@ -1341,14 +1418,6 @@ const Result = ({ scan, onNew, onShare, onRetryTelemetry }) => {
                 <div className="label mb-1 text-[var(--red)]">− DEVIATIONS</div>
                 <ul className="text-[12px] space-y-0.5">
                   {scan.commentary.weaknesses.map((s, i) => <li key={i}>· {s}</li>)}
-                </ul>
-              </div>
-            )}
-            {scan.commentary?.faculties?.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-dashed border-[var(--line-2)]">
-                <div className="label mb-1 text-[var(--amber)]">⌬ PHRENOLOGICAL FACULTIES</div>
-                <ul className="text-[12px] space-y-0.5">
-                  {scan.commentary.faculties.map((s, i) => <li key={i}>· {s}</li>)}
                 </ul>
               </div>
             )}
